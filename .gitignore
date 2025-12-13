@@ -1,0 +1,8 @@
+/vendor/*
+/bin/*
+
+# Archived documentation
+/archive/
+
+# Tests (optional - remove if you want tests tracked)
+/tests/

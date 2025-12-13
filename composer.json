@@ -1,0 +1,44 @@
+{
+    "name": "gcore/gsd-client",
+    "description": "Client library for the Geodineum Service Daemon (GSD)",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["gcore", "gsd", "service-discovery", "geometric", "valkey", "redis"],
+    "authors": [
+        {
+            "name": "gCore Team",
+            "email": "developers@gcore.io"
+        }
+    ],
+    "require": {
+        "php": ">=7.4",
+        "ext-json": "*",
+        "ext-redis": "*"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.0",
+        "squizlabs/php_codesniffer": "^3.6",
+        "phpstan/phpstan": "^1.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "gCore\\GSD\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "gCore\\GSD\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "test:coverage": "phpunit --coverage-text --coverage-html=coverage",
+        "cs": "phpcs --standard=PSR12 src tests",
+        "cs:fix": "phpcbf --standard=PSR12 src tests",
+        "analyse": "phpstan analyse src tests --level=7"
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "stable"
+}
