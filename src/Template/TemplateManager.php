@@ -2,16 +2,16 @@
 
 declare(strict_types=1);
 
-namespace gCore\GSD\Template;
+namespace gCore\gNode\Template;
 
-use gCore\GSD\Client;
-use gCore\GSD\Exception\GSDException;
-use gCore\GSD\Storage\StorageInterface;
+use gCore\gNode\gNodeClientInterface;
+use gCore\gNode\Exception\gNodeException;
+use gCore\gNode\Storage\StorageInterface;
 
 /**
  * TemplateManager - Facade for Tera-powered template system
  *
- * Integrates with GSD daemon's template rendering engine (daemon/src/integration/template_renderer.rs)
+ * Integrates with gNode daemon's template rendering engine (daemon/src/integration/template_renderer.rs)
  * providing 8D geometric capability discovery, dependency DAG management, and server-side rendering.
  *
  * Daemon Features (PRODUCTION-READY):
@@ -23,14 +23,14 @@ use gCore\GSD\Storage\StorageInterface;
  * - Auto-escaping for XSS prevention
  * - ValKey persistence with metadata and output caching
  *
- * @package gCore\GSD\Template
+ * @package gCore\gNode\Template
  */
 class TemplateManager
 {
     /**
-     * @var Client GSD client instance
+     * @var gNodeClientInterface gNode client instance
      */
-    private Client $client;
+    private gNodeClientInterface $client;
 
     /**
      * @var StorageInterface ValKey storage interface
@@ -67,14 +67,14 @@ class TemplateManager
     /**
      * TemplateManager constructor
      *
-     * @param Client $client GSD client instance
+     * @param gNodeClientInterface $client gNode client instance
      * @param StorageInterface $storage ValKey storage interface
      * @param string $siteId Site ID (default: "default")
      * @param string $nodeId Node ID (default: "default")
      * @param array<string, mixed> $config Configuration options
      */
     public function __construct(
-        Client $client,
+        gNodeClientInterface $client,
         StorageInterface $storage,
         string $siteId = 'default',
         string $nodeId = 'default',
@@ -109,18 +109,18 @@ class TemplateManager
      * @param string $content Template content (Tera syntax)
      * @param array<string, mixed> $config Optional configuration (dependencies, variables, etc.)
      * @return array<string, mixed> Registration result with dependencies array
-     * @throws GSDException On registration failure
+     * @throws gNodeException On registration failure
      */
     public function registerTemplate(string $templateId, string $content, array $config = []): array
     {
         if (empty($templateId)) {
             $this->stats['errors']++;
-            throw new GSDException('Template ID cannot be empty');
+            throw new gNodeException('Template ID cannot be empty');
         }
 
         if (empty($content)) {
             $this->stats['errors']++;
-            throw new GSDException('Template content cannot be empty');
+            throw new gNodeException('Template content cannot be empty');
         }
 
         try {
@@ -134,7 +134,7 @@ class TemplateManager
 
             if (!isset($response['stored']) || $response['stored'] !== true) {
                 $this->stats['errors']++;
-                throw new GSDException('Template registration failed: ' . ($response['error'] ?? 'unknown error'));
+                throw new gNodeException('Template registration failed: ' . ($response['error'] ?? 'unknown error'));
             }
 
             $this->stats['templates_registered']++;
@@ -146,11 +146,11 @@ class TemplateManager
                 'registered_in_topology' => $response['registered_in_topology'] ?? false,
                 'ttl' => $response['ttl'] ?? 7200
             ];
-        } catch (GSDException $e) {
+        } catch (gNodeException $e) {
             throw $e;
         } catch (\Exception $e) {
             $this->stats['errors']++;
-            throw new GSDException(
+            throw new gNodeException(
                 "Failed to register template '{$templateId}': " . $e->getMessage(),
                 0,
                 $e
@@ -174,7 +174,7 @@ class TemplateManager
      * @param array<string, mixed> $variables Template variables (will be JSON-encoded)
      * @param array<string, mixed> $config Render configuration
      * @return string Rendered HTML output
-     * @throws GSDException On render failure
+     * @throws gNodeException On render failure
      */
     public function renderTemplate(string $templateId, array $variables = [], array $config = []): string
     {
@@ -192,16 +192,16 @@ class TemplateManager
             if (!$html) {
                 $this->stats['errors']++;
                 $debug = json_encode($response);
-                throw new GSDException("Template rendering failed: no html received (got: {$debug})");
+                throw new gNodeException("Template rendering failed: no html received (got: {$debug})");
             }
 
             $this->stats['renders_performed']++;
             return $html;
-        } catch (GSDException $e) {
+        } catch (gNodeException $e) {
             throw $e;
         } catch (\Exception $e) {
             $this->stats['errors']++;
-            throw new GSDException(
+            throw new gNodeException(
                 "Failed to render template '{$templateId}': " . $e->getMessage(),
                 0,
                 $e
@@ -226,7 +226,7 @@ class TemplateManager
      * @param string|null $hx_trigger Optional HTMX trigger header value
      * @param string|null $cache_control Cache-Control header (default: "public, max-age=31536000, immutable")
      * @return array Response with 'html' and 'headers' keys
-     * @throws GSDException If fragment retrieval fails
+     * @throws gNodeException If fragment retrieval fails
      */
     public function serveFragment(
         string $key,
@@ -246,16 +246,16 @@ class TemplateManager
 
             if (!isset($response['html'])) {
                 $this->stats['errors']++;
-                throw new GSDException('Fragment serving failed: no html content received');
+                throw new gNodeException('Fragment serving failed: no html content received');
             }
 
             $this->stats['renders_performed']++;
             return $response;
-        } catch (GSDException $e) {
+        } catch (gNodeException $e) {
             throw $e;
         } catch (\Exception $e) {
             $this->stats['errors']++;
-            throw new GSDException(
+            throw new gNodeException(
                 "Failed to serve fragment '{$key}': " . $e->getMessage(),
                 0,
                 $e
@@ -272,11 +272,11 @@ class TemplateManager
      * @param string $templateId Template identifier
      * @param array<string, mixed> $config Delete configuration
      * @return bool Success status
-     * @throws GSDException Always throws (not implemented in daemon)
+     * @throws gNodeException Always throws (not implemented in daemon)
      */
     public function deleteTemplate(string $templateId, array $config = []): bool
     {
-        throw new GSDException(
+        throw new gNodeException(
             "delete_template command not available in daemon. Templates expire based on TTL."
         );
     }
@@ -286,7 +286,7 @@ class TemplateManager
      *
      * @param array<string, mixed> $config List configuration
      * @return array<int, string> Array of template identifiers
-     * @throws GSDException On retrieval failure
+     * @throws gNodeException On retrieval failure
      */
     public function listTemplates(array $config = []): array
     {
@@ -307,7 +307,7 @@ class TemplateManager
             return $response['templates'] ?? [];
         } catch (\Exception $e) {
             $this->stats['errors']++;
-            throw new GSDException(
+            throw new gNodeException(
                 'Failed to list templates: ' . $e->getMessage(),
                 0,
                 $e
@@ -324,7 +324,7 @@ class TemplateManager
      * @param string $templateId Template identifier
      * @param array<string, mixed> $config Metadata configuration
      * @return array<string, mixed>|null Capabilities or null if not found
-     * @throws GSDException On retrieval failure
+     * @throws gNodeException On retrieval failure
      */
     public function getTemplateMetadata(string $templateId, array $config = []): ?array
     {
@@ -336,7 +336,7 @@ class TemplateManager
             return $response ?? null;
         } catch (\Exception $e) {
             $this->stats['errors']++;
-            throw new GSDException(
+            throw new gNodeException(
                 "Failed to get capabilities for template '{$templateId}': " . $e->getMessage(),
                 0,
                 $e
@@ -352,7 +352,7 @@ class TemplateManager
      *
      * @param string $templateId Template identifier
      * @return array<int, string> Array of template IDs this template depends on
-     * @throws GSDException On retrieval failure
+     * @throws gNodeException On retrieval failure
      */
     public function getTemplateDependencies(string $templateId): array
     {
@@ -361,7 +361,7 @@ class TemplateManager
             return $capabilities['dependencies'] ?? [];
         } catch (\Exception $e) {
             $this->stats['errors']++;
-            throw new GSDException(
+            throw new gNodeException(
                 "Failed to get dependencies for template '{$templateId}': " . $e->getMessage(),
                 0,
                 $e
@@ -378,11 +378,11 @@ class TemplateManager
      * @param string $templateId Template identifier to invalidate
      * @param array<string, mixed> $config Invalidation configuration
      * @return array<int, string> Array of invalidated template IDs
-     * @throws GSDException Always throws (not implemented in daemon)
+     * @throws gNodeException Always throws (not implemented in daemon)
      */
     public function invalidateTemplate(string $templateId, array $config = []): array
     {
-        throw new GSDException(
+        throw new gNodeException(
             "invalidate_template command not available in daemon. Templates expire based on TTL."
         );
     }
@@ -396,7 +396,7 @@ class TemplateManager
      * @param string $templateId Reference template ID
      * @param int $limit Maximum results
      * @return array<int, array<string, mixed>> Array of matching template IDs with distances
-     * @throws GSDException On discovery failure
+     * @throws gNodeException On discovery failure
      */
     public function discoverSimilarTemplates(string $templateId, int $limit = 10): array
     {
@@ -409,7 +409,7 @@ class TemplateManager
             return $response['similar_templates'] ?? [];
         } catch (\Exception $e) {
             $this->stats['errors']++;
-            throw new GSDException(
+            throw new gNodeException(
                 'Failed to discover similar templates: ' . $e->getMessage(),
                 0,
                 $e
@@ -426,7 +426,7 @@ class TemplateManager
      * @param array<string, float> $capabilities Capability constraints (8D vector or subset)
      * @param int $limit Maximum results
      * @return array<int, array<string, mixed>> Array of matching templates
-     * @throws GSDException On discovery failure
+     * @throws gNodeException On discovery failure
      */
     public function discoverTemplatesByCapability(array $capabilities, int $limit = 100): array
     {
@@ -439,7 +439,7 @@ class TemplateManager
             return $response['templates'] ?? [];
         } catch (\Exception $e) {
             $this->stats['errors']++;
-            throw new GSDException(
+            throw new gNodeException(
                 'Failed to discover templates by capability: ' . $e->getMessage(),
                 0,
                 $e
@@ -457,11 +457,11 @@ class TemplateManager
      * @param array<string, mixed> $variables Template variables
      * @param array<string, mixed> $config Render configuration
      * @return string Rendered output
-     * @throws GSDException Always throws (not implemented in daemon)
+     * @throws gNodeException Always throws (not implemented in daemon)
      */
     public function renderString(string $template, array $variables = [], array $config = []): string
     {
-        throw new GSDException(
+        throw new gNodeException(
             "render_string command not available in daemon. Use registerTemplate() with short TTL instead."
         );
     }
@@ -474,7 +474,7 @@ class TemplateManager
      *
      * @param array<string, mixed> $config Configuration
      * @return array<string, array<string, mixed>> Array of template metadata indexed by template ID
-     * @throws GSDException On retrieval failure
+     * @throws gNodeException On retrieval failure
      */
     public function getAllTemplateMetadata(array $config = []): array
     {
@@ -499,7 +499,7 @@ class TemplateManager
             return $allMetadata;
         } catch (\Exception $e) {
             $this->stats['errors']++;
-            throw new GSDException(
+            throw new gNodeException(
                 'Failed to get all template metadata: ' . $e->getMessage(),
                 0,
                 $e

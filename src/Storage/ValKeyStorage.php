@@ -1,15 +1,16 @@
 <?php
+declare(strict_types=1);
 
-namespace gCore\GSD\Storage;
+namespace gCore\gNode\Storage;
 
-use gCore\GSD\Exception\StorageException;
-use gCore\GSD\ConnectionPool;
+use gCore\gNode\Exception\StorageException;
+use gCore\gNode\ConnectionPool;
 use Redis;
 
 /**
  * ValKeyStorage - ValKey implementation of StorageInterface
  *
- * @package gCore\GSD\Storage
+ * @package gCore\gNode\Storage
  */
 class ValKeyStorage implements StorageInterface
 {
@@ -21,6 +22,90 @@ class ValKeyStorage implements StorageInterface
 
     /** @var bool Connection status */
     protected $connected = false;
+
+    /**
+     * Commit 1.13.c (NC-D3.06): retryable error patterns for transient
+     * ValKey conditions where a short backoff + retry is the right
+     * answer instead of immediate failure. Matched case-insensitively
+     * against the exception message (substring match).
+     *
+     *   CLUSTERDOWN     — cluster lost majority, may recover quickly
+     *   MASTERDOWN      — replica saw master failure, sentinel reroute
+     *   TRYAGAIN        — multi-key op crossed slot during migration
+     *   MOVED           — slot has moved (we don't auto-redirect, but
+     *                      retry once in case the topology stabilized)
+     *   ASK             — slot mid-migration ask redirection
+     *   LOADING         — replica still loading dataset
+     *   BUSY            — server busy running script (call SCRIPT KILL
+     *                      or wait); brief retry can succeed
+     *   connection lost / read error / timeout — socket-level transients
+     *
+     * Non-retryable errors (NOAUTH, WRONGPASS, NOPERM, NOSCRIPT,
+     * MOVED-after-retry, malformed args, etc.) propagate as
+     * StorageException on the first failure. We don't try to be
+     * clever about distinguishing every one; if it's not in this
+     * list, we throw.
+     */
+    private const RETRYABLE_PATTERNS = [
+        'CLUSTERDOWN',
+        'MASTERDOWN',
+        'TRYAGAIN',
+        'LOADING',
+        'BUSY',
+        'connection lost',
+        'read error',
+        'timeout',
+        'went away',
+    ];
+
+    private const MAX_RETRIES = 3;
+
+    /**
+     * Run a redis op with retry+exponential-backoff+jitter on
+     * transient errors. Non-retryable errors (or retries-exhausted)
+     * propagate as StorageException. The caller-provided $opName
+     * names the operation in error messages so callers don't need
+     * their own try/catch wrapping.
+     *
+     * Initial delay: 50ms; doubles each retry; bounded by jitter [0,
+     * delay_ms] additive.
+     *
+     * @template T
+     * @param  callable():T $op
+     * @param  string       $opName
+     * @return T
+     */
+    private function withRetry(callable $op, string $opName)
+    {
+        $attempt = 0;
+        $delayMs = 50;
+        while (true) {
+            try {
+                return $op();
+            } catch (\Exception $e) {
+                $attempt++;
+                $message = $e->getMessage();
+                $retryable = false;
+                foreach (self::RETRYABLE_PATTERNS as $pattern) {
+                    if (stripos($message, $pattern) !== false) {
+                        $retryable = true;
+                        break;
+                    }
+                }
+                if (!$retryable || $attempt > self::MAX_RETRIES) {
+                    throw new StorageException(
+                        "Redis {$opName} error (attempts={$attempt}): {$message}",
+                        0,
+                        $e
+                    );
+                }
+                // Exponential backoff with additive jitter
+                $jitter = mt_rand(0, $delayMs);
+                usleep(($delayMs + $jitter) * 1000);
+                $delayMs *= 2;
+            }
+        }
+    }
 
     /**
      * Constructor
@@ -36,7 +121,7 @@ class ValKeyStorage implements StorageInterface
 
         $this->config = array_merge([
             'host' => '127.0.0.1',
-            'port' => 6379,
+            'port' => 47445,
             'timeout' => 2.5,  // Default timeout for persistent connections
             'retry_interval' => 100,
             'read_timeout' => 2.5,
@@ -63,14 +148,14 @@ class ValKeyStorage implements StorageInterface
             // Get persistent connection from pool
             // ConnectionPool handles authentication and database selection
             $this->redis = ConnectionPool::getConnection(
-                $this->config['host'],
-                $this->config['port'],
+                (string) $this->config['host'],
+                (int) $this->config['port'],
                 $this->config['user'] ?? null,      // ACL username (optional)
                 $this->config['password'] ?? null,   // Password (required for auth)
-                $this->config['timeout'],
-                $this->config['retry_interval'],
-                $this->config['read_timeout'],
-                $this->config['database']
+                (float) $this->config['timeout'],
+                (int) $this->config['retry_interval'],
+                (float) $this->config['read_timeout'],
+                (int) $this->config['database']
             );
 
             // Set prefix if provided
@@ -91,11 +176,47 @@ class ValKeyStorage implements StorageInterface
     /**
      * Get direct access to the Redis instance
      *
+     * @deprecated SECURITY WARNING: Direct Redis access bypasses FCALL security model.
+     *             All operations should use fcall() method to ensure ACL restrictions
+     *             are enforced. This method will be removed in v3.0.
+     *
+     *             Attack scenario: If PHP is compromised, getRedis() allows arbitrary
+     *             Redis commands, bypassing ACL user restrictions. FCALL-only mode
+     *             limits attackers to pre-defined Lua functions only.
+     *
+     *             Use fcall() instead:
+     *             - $storage->fcall('GNODE_CACHE_GET', [], [$key, $siteId])
+     *             - $storage->fcall('GNODE_CACHE_SET', [], [$key, $value, $ttl, $siteId])
+     *             - $storage->fcall('GNODE_STREAM_ADD', [$streamKey], [$fieldsJson, $maxLen])
+     *
      * @return Redis Redis instance
+     * @throws StorageException Always throws - use fcall() instead
      */
     public function getRedis(): Redis
     {
-        return $this->redis;
+        // SECURITY: Log access attempt for audit trail — but only ONCE
+        // per (process, caller-file) pair. The previous unconditional
+        // error_log() flooded logs during fcall-heavy paths (every
+        // luaGet/luaDel writes via recordFcallMetrics() → getRedis()),
+        // generating thousands of identical warnings per request and
+        // amplifying the perceived "hang" during CLI registration loops.
+        // Once-per-caller is enough to surface the audit trail without
+        // turning log volume into a measurable cost.
+        static $loggedCallers = [];
+        $caller = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 3)[1]['file'] ?? 'unknown';
+        if (!isset($loggedCallers[$caller])) {
+            $loggedCallers[$caller] = true;
+            error_log(
+                '[gNode-Client SECURITY] getRedis() called from '
+                . $caller . ' — this method is deprecated and insecure. '
+                . 'Use fcall() instead. (Logged once per caller per process.)'
+            );
+        }
+
+        throw new StorageException(
+            'getRedis() is removed for security reasons — the raw connection '
+            . 'bypasses the FCALL allowlist. Use fcall()/the typed storage API instead.'
+        );
     }
 
     /**
@@ -123,13 +244,25 @@ class ValKeyStorage implements StorageInterface
     /**
      * {@inheritdoc}
      */
+    public function incr(string $key)
+    {
+        return $this->withRetry(fn() => $this->redis->incr($key), 'incr');
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function pfAdd(string $key, array $elements): bool
+    {
+        return (bool)$this->withRetry(fn() => $this->redis->pfAdd($key, $elements), 'pfAdd');
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     public function get(string $key)
     {
-        try {
-            return $this->redis->get($key);
-        } catch (\Exception $e) {
-            throw new StorageException("Redis get error: {$e->getMessage()}", 0, $e);
-        }
+        return $this->withRetry(fn() => $this->redis->get($key), 'get');
     }
 
     /**
@@ -137,15 +270,12 @@ class ValKeyStorage implements StorageInterface
      */
     public function set(string $key, $value, ?int $expiration = null): bool
     {
-        try {
+        return $this->withRetry(function () use ($key, $value, $expiration) {
             if ($expiration !== null) {
                 return $this->redis->setex($key, $expiration, $value);
-            } else {
-                return $this->redis->set($key, $value);
             }
-        } catch (\Exception $e) {
-            throw new StorageException("Redis set error: {$e->getMessage()}", 0, $e);
-        }
+            return $this->redis->set($key, $value);
+        }, 'set');
     }
 
     /**
@@ -153,11 +283,7 @@ class ValKeyStorage implements StorageInterface
      */
     public function delete(string $key): bool
     {
-        try {
-            return $this->redis->del($key) > 0;
-        } catch (\Exception $e) {
-            throw new StorageException("Redis delete error: {$e->getMessage()}", 0, $e);
-        }
+        return $this->withRetry(fn() => $this->redis->del($key) > 0, 'delete');
     }
 
     /**
@@ -165,11 +291,7 @@ class ValKeyStorage implements StorageInterface
      */
     public function exists(string $key): bool
     {
-        try {
-            return $this->redis->exists($key) > 0;
-        } catch (\Exception $e) {
-            throw new StorageException("Redis exists error: {$e->getMessage()}", 0, $e);
-        }
+        return $this->withRetry(fn() => $this->redis->exists($key) > 0, 'exists');
     }
 
     /**
@@ -177,11 +299,7 @@ class ValKeyStorage implements StorageInterface
      */
     public function hGet(string $key, string $field)
     {
-        try {
-            return $this->redis->hGet($key, $field);
-        } catch (\Exception $e) {
-            throw new StorageException("Redis hGet error: {$e->getMessage()}", 0, $e);
-        }
+        return $this->withRetry(fn() => $this->redis->hGet($key, $field), 'hGet');
     }
 
     /**
@@ -189,11 +307,10 @@ class ValKeyStorage implements StorageInterface
      */
     public function hSet(string $key, string $field, $value): bool
     {
-        try {
-            return $this->redis->hSet($key, $field, $value) !== false;
-        } catch (\Exception $e) {
-            throw new StorageException("Redis hSet error: {$e->getMessage()}", 0, $e);
-        }
+        return $this->withRetry(
+            fn() => $this->redis->hSet($key, $field, $value) !== false,
+            'hSet'
+        );
     }
 
     /**
@@ -201,12 +318,10 @@ class ValKeyStorage implements StorageInterface
      */
     public function hGetAll(string $key): array
     {
-        try {
+        return $this->withRetry(function () use ($key) {
             $result = $this->redis->hGetAll($key);
             return $result ?: [];
-        } catch (\Exception $e) {
-            throw new StorageException("Redis hGetAll error: {$e->getMessage()}", 0, $e);
-        }
+        }, 'hGetAll');
     }
 
     /**
@@ -214,13 +329,11 @@ class ValKeyStorage implements StorageInterface
      */
     public function eval(string $script, array $keys, array $args)
     {
-        try {
+        return $this->withRetry(function () use ($script, $keys, $args) {
             $numKeys = count($keys);
             $allArgs = array_merge($keys, $args);
             return $this->redis->eval($script, $allArgs, $numKeys);
-        } catch (\Exception $e) {
-            throw new StorageException("Redis eval error: {$e->getMessage()}", 0, $e);
-        }
+        }, 'eval');
     }
 
     /**
@@ -228,13 +341,11 @@ class ValKeyStorage implements StorageInterface
      */
     public function evalSha(string $sha, array $keys, array $args)
     {
-        try {
+        return $this->withRetry(function () use ($sha, $keys, $args) {
             $numKeys = count($keys);
             $allArgs = array_merge($keys, $args);
             return $this->redis->evalSha($sha, $allArgs, $numKeys);
-        } catch (\Exception $e) {
-            throw new StorageException("Redis evalSha error: {$e->getMessage()}", 0, $e);
-        }
+        }, 'evalSha');
     }
 
     /**
@@ -242,26 +353,32 @@ class ValKeyStorage implements StorageInterface
      */
     public function scriptLoad(string $script): string
     {
-        try {
-            return $this->redis->script('LOAD', $script);
-        } catch (\Exception $e) {
-            throw new StorageException("Redis scriptLoad error: {$e->getMessage()}", 0, $e);
-        }
+        return $this->withRetry(
+            fn() => $this->redis->script('LOAD', $script),
+            'scriptLoad'
+        );
     }
 
     /**
      * {@inheritdoc}
+     * @api
      */
     public function fcall(string $function, array $keys, array $args)
     {
-        try {
-            // Build the command array for rawCommand
+        return $this->withRetry(function () use ($function, $keys, $args) {
+            // Ensure all args are scalar - JSON-encode arrays/objects.
+            // rawCommand() only accepts scalar values.
+            $scalarArgs = array_map(function ($arg) {
+                if (is_array($arg) || is_object($arg)) {
+                    return json_encode($arg);
+                }
+                return $arg;
+            }, $args);
+
             $command = ['FCALL', $function, count($keys)];
-            $command = array_merge($command, $keys, $args);
+            $command = array_merge($command, $keys, $scalarArgs);
             return $this->redis->rawCommand(...$command);
-        } catch (\Exception $e) {
-            throw new StorageException("Redis FCALL error: {$e->getMessage()}", 0, $e);
-        }
+        }, 'FCALL');
     }
 
     /**
@@ -297,6 +414,7 @@ class ValKeyStorage implements StorageInterface
      * @param array $fields Message fields
      * @return string Message ID
      * @throws StorageException If operation fails
+     * @api
      */
     public function xAdd(string $key, string $id, array $fields): string
     {
@@ -710,11 +828,22 @@ class ValKeyStorage implements StorageInterface
      */
     public function keys(string $pattern): array
     {
+        // Ch.1.1 §C.6: cluster-safe pattern enumeration via SCAN cursor.
+        // Caller-supplied $pattern MUST be hash-tagged for multi-key sweeps
+        // in cluster mode (e.g., "{site_id}:cache:*"). Bare patterns will
+        // only sweep the connected shard — caller's responsibility to
+        // hash-tag. SCAN is non-blocking + cluster-aware; replaces
+        // blocking KEYS.
         try {
-            $result = $this->redis->keys($pattern);
-            return $result ?: [];
+            $this->redis->setOption(\Redis::OPT_SCAN, \Redis::SCAN_RETRY);
+            $iter = null;
+            $keys = [];
+            while ($batch = $this->redis->scan($iter, $pattern, 500)) {
+                $keys = array_merge($keys, $batch);
+            }
+            return $keys;
         } catch (\Exception $e) {
-            throw new StorageException("Redis keys error: {$e->getMessage()}", 0, $e);
+            throw new StorageException("Redis scan error: {$e->getMessage()}", 0, $e);
         }
     }
 }

@@ -1,13 +1,14 @@
 <?php
+declare(strict_types=1);
 
-namespace gCore\GSD\Exception;
+namespace gCore\gNode\Exception;
 
 /**
  * ConnectionException - Exception for connection errors
  *
- * @package gCore\GSD\Exception
+ * @package gCore\gNode\Exception
  */
-class ConnectionException extends GSDException
+class ConnectionException extends gNodeException
 {
     /**
      * Constructor

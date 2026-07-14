@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 /**
  * CommandQueue - Auto-batching command queue with multiple flush strategies
  *
@@ -17,17 +18,17 @@
  * - Memory: ~150 bytes per queued command
  * - Overhead: <1ms queue management + 10ms flush timeout
  *
- * @package gCore\GSD\Queue
+ * @package gCore\gNode\Queue
  */
 
-namespace gCore\GSD\Queue;
+namespace gCore\gNode\Queue;
 
-use gCore\GSD\Client;
-use gCore\GSD\Queue\DeferredResult;
+use gCore\gNode\gNodeClientInterface;
+use gCore\gNode\Queue\DeferredResult;
 
 class CommandQueue
 {
-    /** @var Client */
+    /** @var gNodeClientInterface */
     private $client;
 
     /** @var array Queue of commands [{cmd, params, cmdId, timestamp}, ...] */
@@ -68,11 +69,11 @@ class CommandQueue
     ];
 
     /**
-     * @param Client $client GSD client instance
+     * @param gNodeClientInterface $client gNode client instance
      * @param int $maxSize Maximum queue size (default: 100)
      * @param float $maxTimeMs Maximum time in milliseconds (default: 10)
      */
-    public function __construct(Client $client, int $maxSize = 100, float $maxTimeMs = 10.0)
+    public function __construct(gNodeClientInterface $client, int $maxSize = 100, float $maxTimeMs = 10.0)
     {
         $this->client = $client;
         $this->maxSize = $maxSize;

@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 /**
  * ServiceProxy - Transparent service discovery and invocation via magic __call
  *
@@ -14,18 +15,18 @@
  *   $result = $proxy->renderTemplate('mytemplate', ['var' => 'value']);
  *   // Automatically discovers template service and invokes it
  *
- * @package gCore\GSD\Discovery
+ * @package gCore\gNode\Discovery
  */
 
-namespace gCore\GSD\Discovery;
+namespace gCore\gNode\Discovery;
 
-use gCore\GSD\Client;
-use gCore\GSD\Queue\DeferredResult;
-use gCore\GSD\Exception\GSDException;
+use gCore\gNode\gNodeClientInterface;
+use gCore\gNode\Queue\DeferredResult;
+use gCore\gNode\Exception\gNodeException;
 
 class ServiceProxy
 {
-    /** @var Client */
+    /** @var gNodeClientInterface */
     private $client;
 
     /** @var ServiceRegistry */
@@ -50,13 +51,13 @@ class ServiceProxy
     ];
 
     /**
-     * @param Client $client GSD client instance
+     * @param gNodeClientInterface $client gNode client instance
      * @param ServiceRegistry $registry Service registry for method→capability mapping
      * @param ServiceCache $cache Service cache for discovered services
      * @param array $options Configuration options
      */
     public function __construct(
-        Client $client,
+        gNodeClientInterface $client,
         ServiceRegistry $registry,
         ServiceCache $cache,
         array $options = []
@@ -80,7 +81,7 @@ class ServiceProxy
      * @param string $method Method name
      * @param array $args Method arguments
      * @return mixed|DeferredResult Service result, or DeferredResult if queued
-     * @throws GSDException If service discovery fails
+     * @throws gNodeException If service discovery fails
      */
     public function __call(string $method, array $args)
     {
@@ -94,7 +95,7 @@ class ServiceProxy
             $capabilities = $this->registry->getCapabilities($method);
 
             if ($capabilities === null) {
-                throw new GSDException(
+                throw new gNodeException(
                     "Unknown method '{$method}' - not registered in service registry. " .
                     "Register it with ServiceRegistry::register() or use a known method."
                 );
@@ -104,7 +105,7 @@ class ServiceProxy
             $service = $this->discoverService($capabilities);
 
             if ($service === null) {
-                throw new GSDException(
+                throw new gNodeException(
                     "No service found for method '{$method}' with capabilities: " .
                     json_encode($capabilities)
                 );
@@ -117,12 +118,12 @@ class ServiceProxy
             // If queue is enabled on client, this will return DeferredResult
             return $this->client->executeCommand($command, $params);
 
-        } catch (GSDException $e) {
+        } catch (gNodeException $e) {
             $this->stats['errors']++;
             throw $e;
         } catch (\Exception $e) {
             $this->stats['errors']++;
-            throw new GSDException(
+            throw new gNodeException(
                 "Service proxy error for method '{$method}': {$e->getMessage()}",
                 0,
                 $e

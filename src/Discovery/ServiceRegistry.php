@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 /**
  * ServiceRegistry - Method name to capability vector mapping
  *
@@ -14,10 +15,10 @@
  *   $registry->register('renderTemplate', ['html' => 1.0, 'template' => 1.0]);
  *   $caps = $registry->getCapabilities('renderTemplate');
  *
- * @package gCore\GSD\Discovery
+ * @package gCore\gNode\Discovery
  */
 
-namespace gCore\GSD\Discovery;
+namespace gCore\gNode\Discovery;
 
 class ServiceRegistry
 {

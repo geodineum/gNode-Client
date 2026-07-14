@@ -1,13 +1,14 @@
 <?php
+declare(strict_types=1);
 
-namespace gCore\GSD\Exception;
+namespace gCore\gNode\Exception;
 
 /**
  * ScriptException - Exception for script errors
  *
- * @package gCore\GSD\Exception
+ * @package gCore\gNode\Exception
  */
-class ScriptException extends GSDException
+class ScriptException extends gNodeException
 {
     /**
      * Constructor

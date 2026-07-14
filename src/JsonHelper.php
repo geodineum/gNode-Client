@@ -1,18 +1,19 @@
 <?php
+declare(strict_types=1);
 
-namespace gCore\GSD;
+namespace gCore\gNode;
 
 /**
  * JsonHelper - Optimized JSON parsing with multiple strategies
  *
- * Provides high-performance JSON decoding with:
+ * Provides JSON decoding with:
  * - simdjson support (when extension available)
  * - PHP 8.3+ json_validate() for fast validation without parsing
  * - Parse result caching to avoid repeated decoding
  * - Pre-allocation strategies
  * - Graceful fallback to standard json_decode
  *
- * @package gCore\GSD
+ * @package gCore\gNode
  */
 class JsonHelper
 {
@@ -84,7 +85,7 @@ class JsonHelper
         }
         self::$stats['cache_misses']++;
 
-        // Try simdjson if available (2-4x faster)
+        // Try simdjson if available
         if (self::$hasSimdJson) {
             self::$stats['simdjson_used']++;
             try {
@@ -154,7 +155,7 @@ class JsonHelper
     /**
      * Decode batch messages with optimized parsing
      *
-     * Specialized for GSD batch response format where the same
+     * Specialized for gNode batch response format where the same
      * structure is repeated many times.
      *
      * @param string $json JSON string containing array of messages

@@ -1,9 +1,10 @@
 <?php
+declare(strict_types=1);
 
-namespace gCore\GSD\Broadcast;
+namespace gCore\gNode\Broadcast;
 
 /**
- * BroadcastMessage - Immutable broadcast message from GSD broadcast stream
+ * BroadcastMessage - Immutable broadcast message from gNode broadcast stream
  *
  * Represents a single broadcast message (1:many pub-sub pattern).
  * Broadcast streams use XREAD (no consumer groups, no PEL, no XACK).
@@ -17,7 +18,7 @@ namespace gCore\GSD\Broadcast;
  * - health_threshold_exceeded: Service health degraded
  * - custom: Application-specific broadcast
  *
- * Message Format (from gsd_broadcast.lua):
+ * Message Format (from gnode_broadcast.lua):
  * {
  *   "id": "1234567890-0",           // Stream message ID (XREAD)
  *   "type": "topology_update",      // Message type
@@ -32,7 +33,7 @@ namespace gCore\GSD\Broadcast;
  *   }
  * }
  *
- * @package gCore\GSD\Broadcast
+ * @package gCore\gNode\Broadcast
  */
 class BroadcastMessage
 {
@@ -77,7 +78,7 @@ class BroadcastMessage
     /**
      * Create BroadcastMessage from ValKey function result
      *
-     * The GSD_BROADCAST_READ function returns msgpack-encoded array of messages:
+     * The GNODE_BROADCAST_READ function returns msgpack-encoded array of messages:
      * [{id, type, site_id, timestamp, fields}, ...]
      *
      * @param array $data Message data from ValKey function
@@ -134,6 +135,7 @@ class BroadcastMessage
      * Extracts 'msg' or 'message' field from fields.
      *
      * @return string|null Message content or null if not present
+     * @api
      */
     public function getMessage(): ?string
     {
@@ -146,6 +148,7 @@ class BroadcastMessage
      * @param string $fieldName Field name
      * @param mixed $default Default value if field not present
      * @return mixed Field value or default
+     * @api
      */
     public function getField(string $fieldName, $default = null)
     {
@@ -157,6 +160,7 @@ class BroadcastMessage
      *
      * @param string $fieldName Field name
      * @return bool True if field exists
+     * @api
      */
     public function hasField(string $fieldName): bool
     {
@@ -169,6 +173,7 @@ class BroadcastMessage
      * @param int $maxAgeMs Maximum age in milliseconds
      * @param int|null $nowMs Current time (default: current time)
      * @return bool True if message is older than threshold
+     * @api
      */
     public function isStale(int $maxAgeMs, ?int $nowMs = null): bool
     {
@@ -181,6 +186,7 @@ class BroadcastMessage
      *
      * @param int|null $nowMs Current time (default: current time)
      * @return float Message age in seconds
+     * @api
      */
     public function getAgeSeconds(?int $nowMs = null): float
     {
@@ -193,6 +199,7 @@ class BroadcastMessage
      *
      * @param string|array $types Single type or array of types
      * @return bool True if message type matches filter
+     * @api
      */
     public function matchesType($types): bool
     {
@@ -211,6 +218,7 @@ class BroadcastMessage
      * Convert to associative array
      *
      * @return array Message data
+     * @api
      */
     public function toArray(): array
     {
@@ -229,6 +237,7 @@ class BroadcastMessage
      * Convert to JSON string
      *
      * @return string JSON representation
+     * @api
      */
     public function toJson(): string
     {

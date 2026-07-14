@@ -1,13 +1,14 @@
 <?php
+declare(strict_types=1);
 
-namespace gCore\GSD\Storage;
+namespace gCore\gNode\Storage;
 
 /**
  * StorageInterface - Interface for storage backends
  *
- * Defines the methods required by a storage backend for GSD client.
+ * Defines the methods required by a storage backend for gNode client.
  *
- * @package gCore\GSD\Storage
+ * @package gCore\gNode\Storage
  */
 interface StorageInterface
 {
@@ -24,6 +25,23 @@ interface StorageInterface
      * @return bool True if ping succeeded
      */
     public function ping(): bool;
+
+    /**
+     * Increment an integer key (metrics counters)
+     *
+     * @param string $key Key to increment
+     * @return int|false New value, or false on failure
+     */
+    public function incr(string $key);
+
+    /**
+     * Add elements to a HyperLogLog (unique-visitor metrics)
+     *
+     * @param string $key HLL key
+     * @param array $elements Elements to add
+     * @return bool True if the HLL was modified
+     */
+    public function pfAdd(string $key, array $elements): bool;
 
     /**
      * Get a value from storage

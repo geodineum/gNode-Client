@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 /**
  * DeferredResult - Promise-like placeholder for queued command results
  *
@@ -19,12 +20,12 @@
  * - Caches result after first resolution
  * - Thread-safe (PHP request-scoped)
  *
- * @package gCore\GSD\Queue
+ * @package gCore\gNode\Queue
  */
 
-namespace gCore\GSD\Queue;
+namespace gCore\gNode\Queue;
 
-use gCore\GSD\Queue\CommandQueue;
+use gCore\gNode\Queue\CommandQueue;
 
 class DeferredResult
 {

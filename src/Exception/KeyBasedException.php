@@ -1,16 +1,17 @@
 <?php
+declare(strict_types=1);
 
-namespace gCore\GSD\Exception;
+namespace gCore\gNode\Exception;
 
 /**
- * KeyBasedException - Exception for key-based GSD operations
+ * KeyBasedException - Exception for key-based gNode operations
  *
  * Thrown when key-based operations fail (cache misses, timeouts, invalid responses, etc.)
  *
- * @package gCore\GSD\Exception
+ * @package gCore\gNode\Exception
  * @version 2.0.0
  */
-class KeyBasedException extends GSDException
+class KeyBasedException extends gNodeException
 {
     /** @var string|null Request ID that caused the exception */
     protected $requestId;

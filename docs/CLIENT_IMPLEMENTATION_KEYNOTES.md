@@ -1,4 +1,4 @@
-# Geodineum Service Daemon (GSD) Client Implementation Keynotes
+# Geodineum Service Daemon (gNode) Client Implementation Keynotes
 
 > **Architecture Primer: Modularity • Security • Extensibility • Resilience**
 
@@ -6,21 +6,18 @@
 
 **Stream Naming Convention:**
 ```
-{site_id}:gsd:stream:{node_id}:commands    # Command Stream
-{site_id}:gsd:stream:{node_id}:responses   # Response Stream
+{site_id}:gnode:unified:{environment}    # Unified command stream (client → daemon)
+{site_id}:res:{request_id}               # Per-request response key (daemon → client, polled)
 ```
 
-**Default Values:**
-```
-{default}:gsd:stream:default:commands
-{default}:gsd:stream:default:responses
-```
+Braces around `site_id` are literal (Redis Cluster hash-tag routing). The stream is
+per-DTAP-environment (`testing|staging|acceptance|production`), not per-node
+(`src/gNodeClient.php:297-302`).
 
 ## Multi-Node Architecture
 
-- One daemon instance handles **multiple nodes simultaneously**
-- Stream processor auto-discovery finds all command streams matching `{site_id}:gsd:stream:*:commands`
-- Each node maintains isolated communication channels
+- One daemon instance handles multiple sites' unified streams simultaneously
+- Each site/environment pair has an isolated unified stream
 - No explicit configuration required for additional nodes
 
 ## Multi-Site Support
@@ -31,57 +28,58 @@
 
 ## Security Model
 
-- **Defense in Depth**: Client → gCore → ValKey → GSD
-- **No Direct Client Access**: External clients never interact directly with GSD
+- **Defense in Depth**: Client → gCore → ValKey → gNode
+- **No Direct Client Access**: External clients never interact directly with gNode
 - ValKey serves as authentication boundary and transport layer
-- Communication limited to well-defined Redis streams
+- Communication limited to well-defined ValKey streams
 - Site_id/node_id in stream names creates natural authorization boundaries
 - Command validation prevents injection attacks
 
 ## Command Format
 
-**Required Fields:**
+Commands travel as XADD fields with canonical short names and **full command names**
+(`src/gNodeClient.php:3341-3365`):
 ```json
 {
-  "command": "geometric_discover", // Command name
-  "params": {                  // Command-specific parameters
-    "capabilities": [{"dimension": "caching", "value": 0.8}]
-  },
-  "site_id": "nierto.com",     // Site identifier
-  "node_id": "host_www_1",     // Node identifier
-  "id": "cmd-123",             // Unique identifier
-  "timestamp": 1619712345.678  // Unix timestamp with μs precision
+  "t": "c",                        // Type: command
+  "id": "example.com:6864...",     // Request id (uniqid, site-prefixed)
+  "c": "geometric_discover",       // Full command name (no abbreviation on the wire)
+  "p": "{\"capabilities\":[...],\"_request_id\":\"...\"}", // JSON-encoded params
+  "ss": "example.com",             // Source site
+  "sn": "client",                  // Source node
+  "ts": "1751500000000.123"        // Unix timestamp, MILLISECONDS
 }
 ```
 
-**IMPORTANT**: Note that "params" is the correct field name (not "parameters"), and field ordering matters!
+Long-form aliases (`command`, `params`, `site_id`, ...) are accepted daemon-side
+(`gNode daemon/src/utils.rs::field_names`) but this client always emits the short forms.
 
 ## Response Format
 
+The daemon writes the response JSON to the per-request response key; the client polls it
+via `FCALL GNODE_CACHE_GET` with exponential backoff (`src/gNodeClient.php:3466+`):
 ```json
 {
-  "id": "cmd-123",             // Original command ID
   "status": "ok",              // "ok" or "error"
   "result": {},                // Result data (present on success)
-  "error": null,               // Error message (present on failure)
-  "timestamp": 1619712345.789  // Response timestamp
+  "error": null                // Error message (present on failure)
 }
 ```
 
 ## Command Processing Flow
 
-1. Client writes command to command stream
-2. Daemon reads command from stream
+1. Client XADDs command to the unified stream
+2. Daemon reads command via consumer group `gnode-daemon`
 3. Command processor validates and routes command
 4. Handler processes command and produces result
-5. Response sent to response stream
-6. Client reads response from response stream
+5. Daemon writes response to `{site_id}:res:{request_id}`
+6. Client polls the response key until hit or timeout
 
 ## ValKey Functions vs Direct Commands
 
 - **ValKey Functions** (primary): High-performance compiled functions
 - **Lua Scripts** (fallback): When ValKey functions unavailable
-- **Direct Redis Commands** (ultimate fallback): For basic functionality
+- **Direct ValKey Commands** (ultimate fallback): For basic functionality
 
 ## Batch Processing
 
@@ -93,8 +91,8 @@
 
 ### System Commands
 - `ping` - Health check returning "true"
-- `status`/`info` - GSD daemon status
-- `health` - Comprehensive health check
+- `status`/`info` - gNode daemon status
+- `health` - Health check
 - `version` - Version information
 
 ### Geometric Commands
@@ -115,7 +113,6 @@
 - `get_site_info`/`site_info` - Site information
 
 ### Client-level Commands
-- `registerCapabilityDimension` - Register dimension
 - `registerService` - Register service with capabilities
 - `findServices` - Discover services by capability
 - `getServiceDetails` - Service information
@@ -124,7 +121,7 @@
 ## Error Handling Strategy
 
 - **Transient Failures**: Implement exponential backoff (1s, 2s, 4s...)
-- **Persistent Failures**: Fall back to direct Redis operations
+- **Persistent Failures**: Fall back to direct ValKey operations
 - **Network Interruptions**: Buffer commands and retry
 - **Timeouts**: Default 30s, configurable per command
 
@@ -160,13 +157,14 @@
 
 ## Benchmarking Expectations
 
-- Single Node: ~3,800 ops/sec on modest hardware
-- Batch Mode: 10,000+ ops/sec with optimized batch sizes
-- Multi-Node: Near-linear scaling with additional nodes
+- Single-node throughput depends on hardware and command mix — benchmark with
+  your own workload.
+- Batch mode amortizes round-trips and improves with batch size.
+- Multi-node: near-linear scaling with additional nodes.
 
 ---
 
-**SPR Tags**: #service-discovery #capability-space #geometric-topology #n-dimensional #valkey-functions #stream-processing #modular-architecture #resilient-design #redis-streams
+**SPR Tags**: #service-discovery #capability-space #geometric-topology #n-dimensional #valkey-functions #stream-processing #modular-architecture #resilient-design #valkey-streams
 
 **SPR Vectors**: [service_mesh, 0.87], [distributed_systems, 0.92], [microservices, 0.78], [capability_mapping, 0.95], [topology_management, 0.89]
 

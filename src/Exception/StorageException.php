@@ -1,13 +1,14 @@
 <?php
+declare(strict_types=1);
 
-namespace gCore\GSD\Exception;
+namespace gCore\gNode\Exception;
 
 /**
  * StorageException - Exception for storage errors
  *
- * @package gCore\GSD\Exception
+ * @package gCore\gNode\Exception
  */
-class StorageException extends GSDException
+class StorageException extends gNodeException
 {
     /**
      * Constructor

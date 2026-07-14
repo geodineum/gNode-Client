@@ -1,15 +1,16 @@
 <?php
+declare(strict_types=1);
 
-namespace gCore\GSD\Fallback;
+namespace gCore\gNode\Fallback;
 
-use gCore\GSD\Exception\GSDException;
+use gCore\gNode\Exception\gNodeException;
 
 /**
- * FallbackHandler - Local implementation of GSD functionality
+ * FallbackHandler - Local implementation of gNode functionality
  *
- * Provides local fallback when the GSD daemon is unavailable.
+ * Provides local fallback when the gNode daemon is unavailable.
  *
- * @package gCore\GSD\Fallback
+ * @package gCore\gNode\Fallback
  */
 class FallbackHandler
 {
@@ -38,27 +39,17 @@ class FallbackHandler
      * @param string $command Command name
      * @param array $parameters Command parameters
      * @return mixed Command result
-     * @throws GSDException If local execution is not allowed or command is not supported
+     * @throws gNodeException If local execution is not allowed or command is not supported
      */
     public function executeCommand(string $command, array $parameters = [])
     {
         if (!$this->allowLocalExecution && $command !== 'ping') {
-            throw new GSDException("Local execution not allowed for command: {$command}");
+            throw new gNodeException("Local execution not allowed for command: {$command}");
         }
 
         switch ($command) {
             case 'ping':
                 return true;
-
-            case 'registerCapabilityDimension':
-                $name = $parameters['name'] ?? '';
-                $dimension = $parameters['dimension'] ?? 0;
-
-                if (empty($name)) {
-                    throw new GSDException("Missing name parameter for registerCapabilityDimension");
-                }
-
-                return $this->registerCapabilityDimension($name, (int)$dimension);
 
             case 'registerService':
                 $id = $parameters['id'] ?? '';
@@ -66,7 +57,7 @@ class FallbackHandler
                 $metadata = $parameters['metadata'] ?? [];
 
                 if (empty($id)) {
-                    throw new GSDException("Missing id parameter for registerService");
+                    throw new gNodeException("Missing id parameter for registerService");
                 }
 
                 return $this->registerService($id, $capabilities, $metadata);
@@ -75,7 +66,7 @@ class FallbackHandler
                 $requirements = $parameters['requirements'] ?? [];
 
                 if (empty($requirements)) {
-                    throw new GSDException("Missing requirements parameter for findServices");
+                    throw new gNodeException("Missing requirements parameter for findServices");
                 }
 
                 return $this->findServices($requirements);
@@ -84,7 +75,7 @@ class FallbackHandler
                 $id = $parameters['id'] ?? '';
 
                 if (empty($id)) {
-                    throw new GSDException("Missing id parameter for getServiceDetails");
+                    throw new gNodeException("Missing id parameter for getServiceDetails");
                 }
 
                 return $this->getServiceDetails($id);
@@ -98,26 +89,13 @@ class FallbackHandler
             case 'geometric_discover_range':
                 $requirements = $parameters['requirements'] ?? [];
                 if (empty($requirements)) {
-                    throw new GSDException("Missing requirements parameter for geometric_discover_range");
+                    throw new gNodeException("Missing requirements parameter for geometric_discover_range");
                 }
                 return $this->discoverRange($requirements);
 
             default:
-                throw new GSDException("Unsupported command in fallback mode: {$command}");
+                throw new gNodeException("Unsupported command in fallback mode: {$command}");
         }
-    }
-
-    /**
-     * Register a capability dimension
-     *
-     * @param string $name Name of the capability
-     * @param int $dimension Dimension index
-     * @return bool Success
-     */
-    protected function registerCapabilityDimension(string $name, int $dimension): bool
-    {
-        $this->capabilityDimensions[$name] = $dimension;
-        return true;
     }
 
     /**

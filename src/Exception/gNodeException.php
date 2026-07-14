@@ -1,13 +1,14 @@
 <?php
+declare(strict_types=1);
 
-namespace gCore\GSD\Exception;
+namespace gCore\gNode\Exception;
 
 /**
- * GSDException - Base exception for GSD client
+ * gNodeException - Base exception for gNode client
  *
- * @package gCore\GSD\Exception
+ * @package gCore\gNode\Exception
  */
-class GSDException extends \Exception
+class gNodeException extends \Exception
 {
     /**
      * Constructor

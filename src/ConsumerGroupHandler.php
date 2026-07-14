@@ -1,24 +1,27 @@
 <?php
+declare(strict_types=1);
 
-namespace gCore\GSD;
+namespace gCore\gNode;
 
-use gCore\GSD\Storage\StorageInterface;
-use gCore\GSD\Exception\StorageException;
-use gCore\GSD\JsonHelper;
+use gCore\gNode\Storage\StorageInterface;
+use gCore\gNode\Exception\StorageException;
+use gCore\gNode\JsonHelper;
 
 /**
- * ConsumerGroupHandler - Handles stream operations using consumer groups
+ * ConsumerGroupHandler - stream operations via ValKey consumer groups.
  *
- * This class manages communication with the GSD daemon using direct consumer group
- * operations rather than script-based polling for maximum throughput and efficiency.
+ * Activated by `gNodeClient::enableConsumerGroups()` for callers that
+ * prefer direct consumer-group XREADGROUP flow over the FCALL/key-based
+ * path. Native mode (`enableNativeMode`) is consumed by
+ * gCore\Modules\Managers\Base\CacheManager\CacheManager.
  *
- * @deprecated This class is part of the legacy stream-based architecture.
- *             Use KeyBasedClientLuaEnabled instead, which uses the faster key-based
- *             architecture with per-environment streams (gsd:compute:{env}).
- *             Will be removed in v3.0.
- * @see KeyBasedClientLuaEnabled The canonical client implementation
+ * Commit 1.12.c (NC-D1.06) resolved the previous `@deprecated` tag that
+ * pointed at KeyBasedClientLuaEnabled as the "canonical implementation".
+ * That class was itself a backward-compat shim (now deleted per the
+ * project's pre-launch no-back-compat policy), and this class is the
+ * live infrastructure for the consumer-group flow. Tag removed.
  *
- * @package gCore\GSD
+ * @package gCore\gNode
  */
 class ConsumerGroupHandler
 {
@@ -31,6 +34,9 @@ class ConsumerGroupHandler
     /** @var string Node identifier */
     protected $nodeId;
 
+    /** @var string DTAP environment */
+    protected $environment;
+
     /** @var string Stream prefix */
     protected $streamPrefix;
 
@@ -38,10 +44,10 @@ class ConsumerGroupHandler
     protected $unifiedStream;
 
     /** @var string Client consumer group name */
-    protected $clientGroup = 'gsd-client';
+    protected $clientGroup = 'gnode-client';
 
     /** @var string Daemon consumer group name */
-    protected $daemonGroup = 'gsd-daemon';
+    protected $daemonGroup = 'gnode-daemon';
 
     /** @var string Client consumer name */
     protected $consumerName;
@@ -98,8 +104,8 @@ class ConsumerGroupHandler
      *
      * @param StorageInterface $storage Storage interface
      * @param string $siteId Site identifier
-     * @param string $nodeId Node identifier
-     * @param array $config Configuration
+     * @param string $nodeId Node identifier (used for consumer name uniqueness)
+     * @param array $config Configuration (should include 'environment' for DTAP isolation)
      */
     public function __construct(
         StorageInterface $storage,
@@ -112,7 +118,8 @@ class ConsumerGroupHandler
         $this->nodeId = $nodeId;
 
         $this->config = array_merge([
-            'stream_prefix' => 'gsd',
+            'stream_prefix' => 'gnode',
+            'environment' => 'production',  // NEW: DTAP environment for stream isolation
             'debug' => false,
             'batch_size' => 100,
             'max_idle_time' => 30000,
@@ -127,16 +134,19 @@ class ConsumerGroupHandler
         $this->maxIdleTime = $this->config['max_idle_time'];
         $this->trimThreshold = $this->config['trim_threshold'];
         $this->streamPrefix = $this->config['stream_prefix'];
+        $this->environment = $this->config['environment'];  // NEW: Store environment
         $this->clientId = $this->config['client_id'];
         $this->nativeMode = $this->config['native_mode'];
         $this->maxRetries = $this->config['max_retries'];
 
         // Set up unified stream name with braces for hash distribution
+        // Pattern: {site_id}:gnode:unified:{environment}
+        // The {} ensures all keys for a site hash to the same slot in Redis Cluster
         $this->unifiedStream = sprintf(
             '{%s}:%s:unified:%s',
             $this->siteId,
             $this->streamPrefix,
-            $this->nodeId
+            $this->environment  // FIX: Was nodeId - now uses environment for DTAP isolation
         );
 
         // Set up consumer name with stable ID (hostname-pid ensures uniqueness per worker)
@@ -162,7 +172,7 @@ class ConsumerGroupHandler
 
             // PERFORMANCE OPTIMIZATION: Cache verification result for 5 minutes
             // This prevents expensive consumer group verification on every wp-load.php
-            $cacheKey = "gsd:consumer_groups_verified:{$this->siteId}:{$this->nodeId}";
+            $cacheKey = "gnode:consumer_groups_verified:{$this->siteId}:{$this->nodeId}";
             $cachedVerification = $this->storage->get($cacheKey);
 
             if ($cachedVerification === '1') {
@@ -220,7 +230,7 @@ class ConsumerGroupHandler
             } catch (\Exception $e) {
                 // Ignore BUSYGROUP error (group already exists)
                 if (!strpos($e->getMessage(), 'BUSYGROUP')) {
-                    error_log('[GSD-Client ConsumerGroupHandler] FATAL: xGroupCreate failed: ' . $e->getMessage());
+                    error_log('[gNode-Client ConsumerGroupHandler] FATAL: xGroupCreate failed: ' . $e->getMessage());
                     throw $e;
                 }
                 $this->debug("Client consumer group already exists");
@@ -238,7 +248,7 @@ class ConsumerGroupHandler
             } catch (\Exception $e) {
                 // Ignore BUSYGROUP error (group already exists)
                 if (!strpos($e->getMessage(), 'BUSYGROUP')) {
-                    error_log('[GSD-Client ConsumerGroupHandler] FATAL: xGroupCreate daemon failed: ' . $e->getMessage());
+                    error_log('[gNode-Client ConsumerGroupHandler] FATAL: xGroupCreate daemon failed: ' . $e->getMessage());
                     throw $e;
                 }
                 $this->debug("Daemon consumer group already exists");
@@ -254,13 +264,13 @@ class ConsumerGroupHandler
 
             // PERFORMANCE OPTIMIZATION: Cache successful verification for 5 minutes
             // This prevents repeating expensive verification on every wp-load.php
-            $cacheKey = "gsd:consumer_groups_verified:{$this->siteId}:{$this->nodeId}";
+            $cacheKey = "gnode:consumer_groups_verified:{$this->siteId}:{$this->nodeId}";
             $this->storage->set($cacheKey, '1', 300); // 5 minutes TTL
             $this->debug("Cached verification result for 5 minutes");
 
             return true;
         } catch (\Exception $e) {
-            error_log('[GSD-Client ConsumerGroupHandler] FATAL: Initialize failed: ' . $e->getMessage());
+            error_log('[gNode-Client ConsumerGroupHandler] FATAL: Initialize failed: ' . $e->getMessage());
             return false;
         }
     }
@@ -307,7 +317,7 @@ class ConsumerGroupHandler
             // It's WRONG to recreate groups just because they've processed messages.
             return false;
         } catch (\Exception $e) {
-            error_log('[GSD-Client ConsumerGroupHandler] FATAL: verifyConsumerGroups failed: ' . $e->getMessage());
+            error_log('[gNode-Client ConsumerGroupHandler] FATAL: verifyConsumerGroups failed: ' . $e->getMessage());
             return false; // Don't recreate on error, just let create handle it
         }
     }
@@ -337,7 +347,7 @@ class ConsumerGroupHandler
         $this->debug("Sending command: {$command} with ID: {$requestId}");
 
         // Prepare message fields using RESP3 protocol format
-        // CRITICAL: Use full command names (not abbreviated) as per GSD daemon spec
+        // CRITICAL: Use full command names (not abbreviated) as per gNode daemon spec
         $sequenceNum = ++$this->sequenceCounter;
         $fields = [
             't' => 'c',                     // Type: command
@@ -503,7 +513,7 @@ class ConsumerGroupHandler
         // Also store the batch ID itself for direct lookup
         $this->requestToMessageIds[$batchId] = $batchId;
 
-        // NOTE: GSD_PROTOCOL_ENCODE expands batch commands into individual messages,
+        // NOTE: GNODE_PROTOCOL_ENCODE expands batch commands into individual messages,
         // which defeats the purpose of batching. Use direct XADD instead.
         // Prepare batch message fields using optimized field names
         $fields = [
@@ -513,7 +523,7 @@ class ConsumerGroupHandler
             'm' => json_encode($batchMessages, JSON_UNESCAPED_SLASHES), // Messages
             'ss' => $this->siteId,          // Source site
             'sn' => $this->nodeId,          // Source node
-            'ts' => (string)microtime(true) // Timestamp
+            'ts' => (string)(int)(microtime(true) * 1000) // Timestamp (ms — daemon parses i64)
             // Note: Do not add _gh or _cr for command messages as they're for responses
         ];
 
@@ -922,7 +932,7 @@ class ConsumerGroupHandler
             // FAIL FAST on ACL NOPERM errors (don't retry indefinitely)
             $errorMsg = $e->getMessage();
             if (stripos($errorMsg, 'NOPERM') !== false || stripos($errorMsg, 'NOAUTH') !== false) {
-                error_log('[GSD-Client ConsumerGroupHandler] FATAL: ACL permission denied - ' . $errorMsg);
+                error_log('[gNode-Client ConsumerGroupHandler] FATAL: ACL permission denied - ' . $errorMsg);
                 throw new StorageException('ACL permission denied: ' . $errorMsg, 0, $e);
             }
             $this->debug("Error fetching response messages with XREADGROUP: " . $errorMsg);
@@ -1090,11 +1100,11 @@ class ConsumerGroupHandler
         try {
             // Try to use the ValKey protocol ACK function if available
             try {
-                $this->debug("Trying to acknowledge message {$messageId} using GSD_PROTOCOL_ACK function");
+                $this->debug("Trying to acknowledge message {$messageId} using GNODE_PROTOCOL_ACK function");
 
-                // Use the GSD_PROTOCOL_ACK function
+                // Use the GNODE_PROTOCOL_ACK function
                 $result = $this->storage->fcall(
-                    'GSD_PROTOCOL_ACK',
+                    'GNODE_PROTOCOL_ACK',
                     [$stream],
                     [$group, $messageId]
                 );
@@ -1213,7 +1223,7 @@ class ConsumerGroupHandler
     protected function debug(string $message): void
     {
         if ($this->debug) {
-            error_log("[GSD ConsumerGroupHandler] {$message}");
+            error_log("[gNode ConsumerGroupHandler] {$message}");
         }
     }
 }

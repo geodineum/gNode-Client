@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace gCore\GSD\Format;
+namespace gCore\gNode\Format;
 
 /**
  * FormatRegistry - Local format cache
@@ -21,7 +21,7 @@ namespace gCore\GSD\Format;
  * - Format detection: <1ms (cached) vs ~10ms (ValKey)
  * - Schema validation: <0.1ms (cached) vs ~5ms (ValKey)
  *
- * @package gCore\GSD\Format
+ * @package gCore\gNode\Format
  */
 class FormatRegistry
 {

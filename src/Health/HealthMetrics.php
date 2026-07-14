@@ -1,6 +1,7 @@
 <?php
+declare(strict_types=1);
 
-namespace gCore\GSD\Health;
+namespace gCore\gNode\Health;
 
 /**
  * HealthMetrics - Runtime operational metrics for service instances
@@ -21,7 +22,7 @@ namespace gCore\GSD\Health;
  *   "ts": 1696800000000   // Timestamp milliseconds (REQUIRED)
  * }
  *
- * @package gCore\GSD\Health
+ * @package gCore\gNode\Health
  */
 class HealthMetrics
 {
@@ -125,6 +126,7 @@ class HealthMetrics
      *
      * @param int $now Current timestamp in milliseconds
      * @return bool True if metrics have exceeded TTL
+     * @api
      */
     public function isStale(int $now): bool
     {
@@ -139,6 +141,7 @@ class HealthMetrics
      * - Error rate >= 0.05 (5% errors)
      *
      * @return bool True if service is healthy
+     * @api
      */
     public function isHealthy(): bool
     {
@@ -149,13 +152,14 @@ class HealthMetrics
     /**
      * Calculate composite score for ranking (lower is better)
      *
-     * Scoring formula (matches GSD daemon):
+     * Scoring formula (matches gNode daemon):
      * - Load factor: 60% weight
      * - CPU usage: 20% weight
      * - Memory usage: 10% weight
      * - Latency: 10% weight (normalized to 0-1 scale)
      *
      * @return float Composite score (0.0-1.0+, lower is better)
+     * @api
      */
     public function calculateScore(): float
     {
@@ -180,6 +184,7 @@ class HealthMetrics
      * - ts: timestamp
      *
      * @return array Compressed message fields
+     * @api
      */
     public function toCompressedFormat(): array
     {
@@ -218,6 +223,7 @@ class HealthMetrics
      * Convert to associative array (verbose format)
      *
      * @return array Full metrics data
+     * @api
      */
     public function toArray(): array
     {
@@ -334,6 +340,7 @@ class HealthMetrics
      * Validate metrics values
      *
      * @return array Array of validation errors (empty if valid)
+     * @api
      */
     public function validate(): array
     {

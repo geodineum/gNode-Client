@@ -1,20 +1,21 @@
 <?php
+declare(strict_types=1);
 
-namespace gCore\GSD\Utils;
+namespace gCore\gNode\Utils;
 
-use gCore\GSD\Client;
-use gCore\GSD\Storage\ValKeyStorage;
-use gCore\GSD\Exception\GSDException;
+use gCore\gNode\Client;
+use gCore\gNode\Storage\ValKeyStorage;
+use gCore\gNode\Exception\gNodeException;
 
 /**
- * IntegrationHelper - Helper for integrating GSD with applications
+ * IntegrationHelper - Helper for integrating gNode with applications
  *
- * @package gCore\GSD\Utils
+ * @package gCore\gNode\Utils
  */
 class IntegrationHelper
 {
     /**
-     * Initialize GSD client
+     * Initialize gNode client
      *
      * @param array $config Configuration options
      * @param bool $ensureDaemonRunning Whether to ensure daemon is running
@@ -31,21 +32,19 @@ class IntegrationHelper
             'config' => $config
         ];
 
-        // Check for ValKey password from .gsd/valkey.password file if not provided
+        // Resolve ValKey password via CredentialResolver if not provided
         if (!isset($config['password']) || $config['password'] === null) {
-            $passwordFile = '.gsd/valkey.password';
-            if (file_exists($passwordFile)) {
-                $password = trim(file_get_contents($passwordFile));
-                if (!empty($password)) {
-                    $config['password'] = $password;
-                }
+            $user = $config['user'] ?? getenv('VALKEY_USER') ?: 'gnode_client';
+            $password = \gCore\gNode\Config\CredentialResolver::tryResolve($user);
+            if ($password !== null) {
+                $config['password'] = $password;
             }
         }
 
         // Default configuration
         $config = array_merge([
-            'host' => '127.0.0.1',
-            'port' => 6379,
+            'host' => getenv('VALKEY_HOST') ?: '127.0.0.1',
+            'port' => (int) (getenv('VALKEY_PORT') ?: 47445),
             'password' => null,
             'site_id' => 'default',
             'node_id' => 'default',
@@ -55,7 +54,7 @@ class IntegrationHelper
             'timeout' => 5.0,
             'daemon_path' => null,
             'log_path' => null,
-            'stream_prefix' => 'gsd'
+            'stream_prefix' => 'gnode'
         ], $config);
 
         $results['config'] = $config;
@@ -71,7 +70,7 @@ class IntegrationHelper
             // Step 2: Check storage connection
             if (!$storage->ping()) {
                 $results['status'] = 'error';
-                $results['message'] = 'Cannot connect to Redis/ValKey';
+                $results['message'] = 'Cannot connect to ValKey';
                 return $results;
             }
 
@@ -123,14 +122,14 @@ class IntegrationHelper
                     $results['message'] = 'Using fallback mode (daemon not available)';
                 } else {
                     $results['status'] = 'healthy';
-                    $results['message'] = 'GSD client initialized successfully';
+                    $results['message'] = 'gNode client initialized successfully';
                 }
             } else {
                 $results['status'] = 'error';
                 $results['message'] = 'Cannot connect to daemon and fallback disabled';
                 $results['client'] = null;
             }
-        } catch (GSDException $e) {
+        } catch (gNodeException $e) {
             $results['status'] = 'error';
             $results['message'] = 'Initialization error: ' . $e->getMessage();
         } catch (\Exception $e) {
@@ -152,7 +151,7 @@ class IntegrationHelper
     public static function getCommandStreamKey(
         string $siteId,
         string $nodeId,
-        string $streamPrefix = 'gsd'
+        string $streamPrefix = 'gnode'
     ): string {
         return sprintf('{%s}:%s:stream:%s:commands', $siteId, $streamPrefix, $nodeId);
     }
@@ -168,7 +167,7 @@ class IntegrationHelper
     public static function getResponseStreamKey(
         string $siteId,
         string $nodeId,
-        string $streamPrefix = 'gsd'
+        string $streamPrefix = 'gnode'
     ): string {
         return sprintf('{%s}:%s:stream:%s:responses', $siteId, $streamPrefix, $nodeId);
     }
@@ -184,7 +183,7 @@ class IntegrationHelper
     public static function getDaemonPidKey(
         string $siteId,
         string $nodeId,
-        string $streamPrefix = 'gsd'
+        string $streamPrefix = 'gnode'
     ): string {
         return sprintf('{%s}:%s:daemon:pid:%s', $siteId, $streamPrefix, $nodeId);
     }

@@ -1,17 +1,18 @@
 <?php
+declare(strict_types=1);
 
-namespace gCore\GSD\Broadcast;
+namespace gCore\gNode\Broadcast;
 
-use gCore\GSD\Storage\StorageInterface;
-use gCore\GSD\Exception\StorageException;
+use gCore\gNode\Storage\StorageInterface;
+use gCore\gNode\Exception\StorageException;
 
 /**
- * BroadcastReader - Client for reading GSD broadcast streams
+ * BroadcastReader - Client for reading gNode broadcast streams
  *
  * This class reads broadcast messages from the global broadcast stream using
- * ValKey functions (gsd_broadcast.lua) for optimal performance.
+ * ValKey functions (gnode_broadcast.lua) for optimal performance.
  *
- * Stream: {site_id}:gsd:broadcast:global
+ * Stream: {site_id}:gnode:broadcast:global
  * Pattern: XREAD (no consumer groups, each reader tracks own position)
  * Throughput: Optimized for infrequent reads (not high-frequency like health)
  *
@@ -37,7 +38,7 @@ use gCore\GSD\Exception\StorageException;
  * $reader->write('config_changed', ['config_key' => 'timeout', 'value' => 30]);
  * ```
  *
- * @package gCore\GSD\Broadcast
+ * @package gCore\gNode\Broadcast
  */
 class BroadcastReader
 {
@@ -85,9 +86,9 @@ class BroadcastReader
         $this->debug = $config['debug'] ?? false;
         $this->useValkeyFunctions = $config['use_valkey_functions'] ?? true;
 
-        // Broadcast stream naming convention: {site_id}:gsd:broadcast:global
-        // Using braces for proper hash distribution in ValKey/Redis
-        $streamPrefix = $config['stream_prefix'] ?? 'gsd';
+        // Broadcast stream naming convention: {site_id}:gnode:broadcast:global
+        // Using braces for proper hash distribution in ValKey
+        $streamPrefix = $config['stream_prefix'] ?? 'gnode';
         $this->broadcastStream = sprintf(
             '{%s}:%s:broadcast:global',
             $this->siteId,
@@ -111,6 +112,7 @@ class BroadcastReader
      * @param string|null $typeFilter Filter by message type (null = all types)
      * @return BroadcastMessage[] Array of broadcast messages
      * @throws StorageException If storage operation fails
+     * @api
      */
     public function read(int $count = 100, int $blockMs = 0, ?string $typeFilter = null): array
     {
@@ -124,7 +126,7 @@ class BroadcastReader
             $messages = [];
 
             if ($this->useValkeyFunctions) {
-                // Use GSD_BROADCAST_READ ValKey function (tier 1)
+                // Use GNODE_BROADCAST_READ ValKey function (tier 1)
                 $messages = $this->readWithValkeyFunction($count, $blockMs);
             } else {
                 // Fall back to direct XREAD (tier 2)
@@ -163,7 +165,7 @@ class BroadcastReader
     }
 
     /**
-     * Read broadcast messages using GSD_BROADCAST_READ ValKey function
+     * Read broadcast messages using GNODE_BROADCAST_READ ValKey function
      *
      * @param int $count Maximum messages to read
      * @param int $blockMs Block timeout in milliseconds
@@ -173,18 +175,12 @@ class BroadcastReader
     private function readWithValkeyFunction(int $count, int $blockMs): array
     {
         try {
-            // Call GSD_BROADCAST_READ via FCALL
-            // FCALL GSD_BROADCAST_READ 1 {stream_key} {last_id} {count} {block_ms}
-            $redis = $this->storage->getRedis();
-
-            $result = $redis->rawCommand(
-                'FCALL',
-                'GSD_BROADCAST_READ',
-                1,
-                $this->broadcastStream,
-                $this->lastSeenId,
-                $count,
-                $blockMs
+            // Call GNODE_BROADCAST_READ via FCALL
+            // FCALL GNODE_BROADCAST_READ 1 {stream_key} {last_id} {count} {block_ms}
+            $result = $this->storage->fcall(
+                'GNODE_BROADCAST_READ',
+                [$this->broadcastStream],
+                [$this->lastSeenId, $count, $blockMs]
             );
 
             // Result is msgpack-encoded array of messages
@@ -259,7 +255,7 @@ class BroadcastReader
     }
 
     /**
-     * Write broadcast message using GSD_BROADCAST_WRITE ValKey function
+     * Write broadcast message using GNODE_BROADCAST_WRITE ValKey function
      *
      * This publishes a message to the broadcast stream. All readers will receive it.
      *
@@ -267,6 +263,7 @@ class BroadcastReader
      * @param array $fields Additional message fields
      * @return string Message ID from XADD
      * @throws StorageException If storage operation fails
+     * @api
      */
     public function write(string $messageType, array $fields = []): string
     {
@@ -286,7 +283,7 @@ class BroadcastReader
             $fieldsJson = json_encode($fields, JSON_UNESCAPED_SLASHES);
 
             if ($this->useValkeyFunctions) {
-                // Use GSD_BROADCAST_WRITE ValKey function
+                // Use GNODE_BROADCAST_WRITE ValKey function
                 $messageId = $this->writeWithValkeyFunction($messageType, $fieldsJson);
             } else {
                 // Fall back to direct XADD
@@ -310,7 +307,7 @@ class BroadcastReader
     }
 
     /**
-     * Write broadcast message using GSD_BROADCAST_WRITE ValKey function
+     * Write broadcast message using GNODE_BROADCAST_WRITE ValKey function
      *
      * @param string $messageType Message type
      * @param string $fieldsJson JSON-encoded fields
@@ -320,17 +317,12 @@ class BroadcastReader
     private function writeWithValkeyFunction(string $messageType, string $fieldsJson): string
     {
         try {
-            // Call GSD_BROADCAST_WRITE via FCALL
-            // FCALL GSD_BROADCAST_WRITE 1 {stream_key} {message_type} {fields_json}
-            $redis = $this->storage->getRedis();
-
-            $messageId = $redis->rawCommand(
-                'FCALL',
-                'GSD_BROADCAST_WRITE',
-                1,
-                $this->broadcastStream,
-                $messageType,
-                $fieldsJson
+            // Call GNODE_BROADCAST_WRITE via FCALL
+            // FCALL GNODE_BROADCAST_WRITE 1 {stream_key} {message_type} {fields_json}
+            $messageId = $this->storage->fcall(
+                'GNODE_BROADCAST_WRITE',
+                [$this->broadcastStream],
+                [$messageType, $fieldsJson]
             );
 
             return (string)$messageId;
@@ -381,7 +373,7 @@ class BroadcastReader
     }
 
     /**
-     * Trim broadcast stream by retention time using GSD_BROADCAST_TRIM
+     * Trim broadcast stream by retention time using GNODE_BROADCAST_TRIM
      *
      * This removes old messages to keep stream size manageable.
      * Uses MAXLEN with approximate trim for efficiency.
@@ -389,6 +381,7 @@ class BroadcastReader
      * @param int $retentionSeconds Keep messages newer than this (default: 300 = 5 minutes)
      * @return int Number of messages trimmed
      * @throws StorageException If operation fails
+     * @api
      */
     public function trim(int $retentionSeconds = 300): int
     {
@@ -398,15 +391,11 @@ class BroadcastReader
 
         try {
             if ($this->useValkeyFunctions) {
-                // Use GSD_BROADCAST_TRIM ValKey function
-                $redis = $this->storage->getRedis();
-
-                $trimmed = $redis->rawCommand(
-                    'FCALL',
-                    'GSD_BROADCAST_TRIM',
-                    1,
-                    $this->broadcastStream,
-                    $retentionSeconds
+                // Use GNODE_BROADCAST_TRIM ValKey function
+                $trimmed = $this->storage->fcall(
+                    'GNODE_BROADCAST_TRIM',
+                    [$this->broadcastStream],
+                    [$retentionSeconds]
                 );
 
                 $this->debug("Trimmed broadcast stream: removed {$trimmed} messages");
@@ -416,8 +405,7 @@ class BroadcastReader
                 $estimatedRate = 10; // messages per second
                 $maxMessages = max($retentionSeconds * $estimatedRate, 1000);
 
-                $redis = $this->storage->getRedis();
-                $trimmed = $redis->xTrim($this->broadcastStream, $maxMessages, true); // approximate
+                $trimmed = $this->storage->xTrim($this->broadcastStream, $maxMessages, true); // approximate
 
                 $this->debug("Trimmed broadcast stream: removed {$trimmed} messages");
                 return (int)$trimmed;
@@ -429,7 +417,7 @@ class BroadcastReader
     }
 
     /**
-     * Get broadcast stream metadata using GSD_BROADCAST_INFO
+     * Get broadcast stream metadata using GNODE_BROADCAST_INFO
      *
      * @return array Stream info with length, first_id, last_id
      * @throws StorageException If operation fails
@@ -443,14 +431,11 @@ class BroadcastReader
         try {
             if ($this->useValkeyFunctions) {
                 try {
-                    // Use GSD_BROADCAST_INFO ValKey function
-                    $redis = $this->storage->getRedis();
-
-                    $result = $redis->rawCommand(
-                        'FCALL',
-                        'GSD_BROADCAST_INFO',
-                        1,
-                        $this->broadcastStream
+                    // Use GNODE_BROADCAST_INFO ValKey function
+                    $result = $this->storage->fcall(
+                        'GNODE_BROADCAST_INFO',
+                        [$this->broadcastStream],
+                        []
                     );
 
                     // Result is msgpack-encoded info map
@@ -495,6 +480,7 @@ class BroadcastReader
      * Reset position to read only new messages (from now)
      *
      * @return void
+     * @api
      */
     public function resetToNewMessages(): void
     {
@@ -507,6 +493,7 @@ class BroadcastReader
      *
      * @param string $messageId Message ID to start from
      * @return void
+     * @api
      */
     public function setPosition(string $messageId): void
     {
@@ -518,6 +505,7 @@ class BroadcastReader
      * Get current position (last-seen message ID)
      *
      * @return string Current position
+     * @api
      */
     public function getPosition(): string
     {
@@ -558,6 +546,7 @@ class BroadcastReader
      * Get reader statistics
      *
      * @return array Statistics about read operations
+     * @api
      */
     public function getStatistics(): array
     {

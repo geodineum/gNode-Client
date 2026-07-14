@@ -1,9 +1,10 @@
 <?php
+declare(strict_types=1);
 
-namespace gCore\GSD\Health;
+namespace gCore\gNode\Health;
 
-use gCore\GSD\Storage\StorageInterface;
-use gCore\GSD\Exception\StorageException;
+use gCore\gNode\Storage\StorageInterface;
+use gCore\gNode\Exception\StorageException;
 
 /**
  * HealthStreamWriter - High-frequency health metrics publisher
@@ -11,8 +12,8 @@ use gCore\GSD\Exception\StorageException;
  * This class writes health metrics directly to the dedicated health stream
  * using compressed field format for optimal bandwidth efficiency.
  *
- * Stream: {site_id}:gsd:health:{node_id}
- * Consumer Group: gsd-daemon (daemon reads from this stream)
+ * Stream: {site_id}:gnode:health:{node_id}
+ * Consumer Group: gnode-daemon (daemon reads from this stream)
  * Throughput: Supports >10,000 msg/sec
  *
  * Usage:
@@ -22,7 +23,7 @@ use gCore\GSD\Exception\StorageException;
  * $writer->publishMetrics($metrics);
  * ```
  *
- * @package gCore\GSD\Health
+ * @package gCore\gNode\Health
  */
 class HealthStreamWriter
 {
@@ -34,6 +35,9 @@ class HealthStreamWriter
 
     /** @var string Node identifier */
     private $nodeId;
+
+    /** @var string DTAP environment */
+    private $environment;
 
     /** @var string Health stream key */
     private $healthStream;
@@ -59,7 +63,7 @@ class HealthStreamWriter
      * @param StorageInterface $storage Storage interface
      * @param string $siteId Site identifier (default: 'default')
      * @param string $nodeId Node identifier (default: 'default')
-     * @param array $config Configuration options
+     * @param array $config Configuration options (should include 'environment' for DTAP isolation)
      */
     public function __construct(
         StorageInterface $storage,
@@ -70,16 +74,18 @@ class HealthStreamWriter
         $this->storage = $storage;
         $this->siteId = $siteId;
         $this->nodeId = $nodeId;
+        $this->environment = $config['environment'] ?? 'production';  // NEW: DTAP environment
         $this->debug = $config['debug'] ?? false;
 
-        // Health stream naming convention: {site_id}:gsd:health:{node_id}
-        // Using braces for proper hash distribution in ValKey/Redis
-        $streamPrefix = $config['stream_prefix'] ?? 'gsd';
+        // Health stream naming convention: {site_id}:gnode:health:{environment}
+        // Using braces for proper hash distribution in ValKey
+        // Pattern matches daemon expectation: {site_id}:gnode:health:{environment}
+        $streamPrefix = $config['stream_prefix'] ?? 'gnode';
         $this->healthStream = sprintf(
             '{%s}:%s:health:%s',
             $this->siteId,
             $streamPrefix,
-            $this->nodeId
+            $this->environment  // FIX: Was nodeId - now uses environment for DTAP isolation
         );
 
         $this->debug("HealthStreamWriter initialized for stream: {$this->healthStream}");
@@ -95,6 +101,7 @@ class HealthStreamWriter
      * @return string Message ID from XADD
      * @throws StorageException If storage operation fails
      * @throws \InvalidArgumentException If metrics are invalid
+     * @api
      */
     public function publishMetrics(HealthMetrics $metrics): string
     {
@@ -465,13 +472,13 @@ class HealthStreamWriter
         try {
             // Create consumer group for daemon
             // Start from '0' to read all messages (including historical)
-            $this->storage->xGroupCreate($this->healthStream, 'gsd-daemon', '0', true);
-            $this->debug("Created consumer group 'gsd-daemon' for health stream");
+            $this->storage->xGroupCreate($this->healthStream, 'gnode-daemon', '0', true);
+            $this->debug("Created consumer group 'gnode-daemon' for health stream");
             return true;
         } catch (\Exception $e) {
             // Ignore BUSYGROUP error (group already exists)
             if (strpos($e->getMessage(), 'BUSYGROUP') !== false) {
-                $this->debug("Consumer group 'gsd-daemon' already exists for health stream");
+                $this->debug("Consumer group 'gnode-daemon' already exists for health stream");
                 return true;
             }
 

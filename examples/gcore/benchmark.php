@@ -1,6 +1,6 @@
 <?php
 /**
- * gCore GSD Integration - Performance Benchmark
+ * gCore gNode Integration - Performance Benchmark
  *
  * Tests:
  * - Auto-batching throughput (target: 10,000+ cmd/s)
@@ -8,7 +8,7 @@
  * - Queue overhead (target: <1ms)
  * - Simdjson acceleration (if available)
  *
- * @package gCore\GSD\Examples
+ * @package gCore\gNode\Examples
  */
 
 require_once __DIR__ . '/../../../gCore/bootstrap.php'; // Adjust path as needed
@@ -17,11 +17,11 @@ require_once __DIR__ . '/../../../gCore/bootstrap.php'; // Adjust path as needed
 $gCore = \gCore\Core::getInstance();
 $gCore->initialize();
 
-// Get GSD service
-$gsd = $gCore->getService('GSD');
-$client = $gsd->getClient();
+// Get gNode service
+$gNode = $gCore->getService('gNode');
+$client = $gNode->getClient();
 
-echo "=== gCore GSD Integration Performance Benchmark ===\n\n";
+echo "=== gCore gNode Integration Performance Benchmark ===\n\n";
 
 // Check requirements
 echo "Environment:\n";
@@ -124,7 +124,7 @@ echo "  Target: 10,000 cmd/s - " . ($overallThroughput >= 10000 ? "✓ PASS" : "
 echo "=== Benchmark 3: Service Discovery Cache Performance ===\n\n";
 
 // Clear cache first
-$gsd->clearCache();
+$gNode->clearCache();
 
 $capabilities = [
     'template_rendering' => 1.0,
@@ -138,7 +138,7 @@ $cacheMisses = 0;
 echo "Performing 50 identical service discoveries...\n";
 
 for ($i = 0; $i < 50; $i++) {
-    $statsBefore = $gsd->getProxyStats();
+    $statsBefore = $gNode->getProxyStats();
     $hitsBefore = $statsBefore['cache_hits'] ?? 0;
     $missesBefore = $statsBefore['cache_misses'] ?? 0;
 
@@ -149,7 +149,7 @@ for ($i = 0; $i < 50; $i++) {
     $lookupTime = ($end - $start) * 1000;
     $lookupTimes[] = $lookupTime;
 
-    $statsAfter = $gsd->getProxyStats();
+    $statsAfter = $gNode->getProxyStats();
     $hitsAfter = $statsAfter['cache_hits'] ?? 0;
     $missesAfter = $statsAfter['cache_misses'] ?? 0;
 
@@ -254,7 +254,7 @@ echo "  4. Success rate: " . ($successRate >= 99 ? "✓" : "✗") . " " .
      number_format($successRate, 1) . "% (target: ≥99%)\n";
 
 echo "\nFinal Stats:\n";
-$finalStats = $gsd->getProxyStats();
+$finalStats = $gNode->getProxyStats();
 print_r($finalStats);
 
 if ($queue) {

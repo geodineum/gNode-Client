@@ -1,40 +1,39 @@
 <?php
 /**
- * Standalone GSD-Client Auto-Batching Test
+ * Standalone gNode-Client Auto-Batching Test
  *
  * Tests the new auto-batching features without gCore dependency.
  * This can be run directly to verify the integration works.
  *
  * Prerequisites:
- * - GSD daemon running
+ * - gNode daemon running
  * - ValKey running with auth configured
  * - Composer autoload available
  */
 
 require_once __DIR__ . '/../../vendor/autoload.php';
 
-use gCore\GSD\Client;
-use gCore\GSD\Storage\ValKeyStorage;
-use gCore\GSD\Discovery\ServiceProxy;
-use gCore\GSD\Discovery\ServiceRegistry;
-use gCore\GSD\Discovery\ServiceCache;
+use gCore\gNode\Client;
+use gCore\gNode\Storage\ValKeyStorage;
+use gCore\gNode\Discovery\ServiceProxy;
+use gCore\gNode\Discovery\ServiceRegistry;
+use gCore\gNode\Discovery\ServiceCache;
 
-echo "=== GSD-Client Auto-Batching Standalone Test ===\n\n";
+echo "=== gNode-Client Auto-Batching Standalone Test ===\n\n";
 
-// Read ValKey password
-$passwordFile = __DIR__ . '/../../../GSD/.gsd/valkey.password';
-$password = file_exists($passwordFile) ? trim(file_get_contents($passwordFile)) : null;
+// Resolve ValKey password via CredentialResolver (checks centralized → standard → legacy paths)
+$password = \gCore\gNode\Config\CredentialResolver::tryResolve('gnode_client');
 
 if (!$password) {
-    die("ERROR: ValKey password not found at $passwordFile\n");
+    die("ERROR: ValKey password not found. Check /etc/geodineum/credentials/ or run register-site.sh\n");
 }
 
-echo "1. Initializing GSD Client with auto-batching enabled...\n";
+echo "1. Initializing gNode Client with auto-batching enabled...\n";
 
 // Create storage
 $storage = new ValKeyStorage([
     'host' => '127.0.0.1',
-    'port' => 6379,
+    'port' => 47445,
     'password' => $password,
     'database' => 0,
 ]);
@@ -45,7 +44,7 @@ $client = new Client(
     'default', // site_id
     'default', // node_id
     [
-        'stream_prefix' => 'gsd',
+        'stream_prefix' => 'gnode',
         'debug' => false,
         'timeout' => 5.0,
         'batch' => [

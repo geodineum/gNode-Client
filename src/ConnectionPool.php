@@ -1,9 +1,10 @@
 <?php
+declare(strict_types=1);
 
-namespace gCore\GSD;
+namespace gCore\gNode;
 
 use Redis;
-use gCore\GSD\Exception\StorageException;
+use gCore\gNode\Exception\StorageException;
 
 /**
  * ConnectionPool - Manages persistent Redis connections
@@ -12,7 +13,7 @@ use gCore\GSD\Exception\StorageException;
  * across requests in PHP-FPM/Apache environments, eliminating connection
  * overhead and reducing latency.
  *
- * @package gCore\GSD
+ * @package gCore\gNode
  */
 class ConnectionPool
 {
@@ -43,7 +44,7 @@ class ConnectionPool
      */
     public static function getConnection(
         string $host = '127.0.0.1',
-        int $port = 6379,
+        int $port = 47445,
         ?string $user = null,
         ?string $password = null,
         float $timeout = 2.5,
@@ -182,7 +183,7 @@ class ConnectionPool
      */
     public static function removeConnection(
         string $host = '127.0.0.1',
-        int $port = 6379,
+        int $port = 47445,
         int $database = 0
     ): void {
         $key = sprintf('%s:%d:%d', $host, $port, $database);

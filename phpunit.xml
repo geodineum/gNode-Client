@@ -27,11 +27,12 @@
             <directory suffix=".php">src</directory>
         </include>
     </coverage>
-    
+
     <php>
-        <env name="REDIS_HOST" value="127.0.0.1"/>
-        <env name="REDIS_PORT" value="6379"/>
-        <env name="GSD_SITE_ID" value="default"/>
-        <env name="GSD_NODE_ID" value="default"/>
+        <env name="VALKEY_HOST" value="127.0.0.1"/>
+        <env name="VALKEY_PORT" value="47445"/>
+        <!-- GNODE_SITE_ID must be set to a daemon registered site for integration tests -->
+        <!-- Example: GNODE_SITE_ID=example_com php vendor/bin/phpunit testsuite integration -->
+        <env name="GNODE_NODE_ID" value="default"/>
     </php>
 </phpunit>

@@ -1,20 +1,20 @@
 <?php
 /**
- * gCore GSD Integration - Basic Usage Example
+ * gCore gNode Integration - Basic Usage Example
  *
- * Demonstrates the key features of the gCore GSD integration:
+ * Demonstrates the key features of the gCore gNode integration:
  * - Auto-batching (10K+ cmd/s)
  * - Transparent service proxying
  * - Service discovery caching
  * - Load-aware routing
  *
  * Prerequisites:
- * - gCore installed with GSD-Client library
+ * - gCore installed with gNode-Client library
  * - ValKey daemon running
- * - GSD daemon running
- * - Config file: gCore/config/gsd.php configured
+ * - gNode daemon running
+ * - Config file: gCore/config/gnode.php configured
  *
- * @package gCore\GSD\Examples
+ * @package gCore\gNode\Examples
  */
 
 require_once __DIR__ . '/../../../gCore/bootstrap.php'; // Adjust path as needed
@@ -23,10 +23,10 @@ require_once __DIR__ . '/../../../gCore/bootstrap.php'; // Adjust path as needed
 $gCore = \gCore\Core::getInstance();
 $gCore->initialize();
 
-// Get GSD service via gCore's service locator
-$gsd = $gCore->getService('GSD');
+// Get gNode service via gCore's service locator
+$gNode = $gCore->getService('gNode');
 
-echo "=== gCore GSD Integration Examples ===\n\n";
+echo "=== gCore gNode Integration Examples ===\n\n";
 
 // ==================================================================
 // Example 1: Basic Transparent Calls (Auto-batched)
@@ -36,9 +36,9 @@ echo "1. Basic transparent calls (auto-batched):\n";
 echo "   Calling ping(), status(), echo() - all batched automatically\n\n";
 
 // These calls return DeferredResult objects (promise-like)
-$result1 = $gsd->ping();
-$result2 = $gsd->status();
-$result3 = $gsd->echo('Hello from gCore!');
+$result1 = $gNode->ping();
+$result2 = $gNode->status();
+$result3 = $gNode->echo('Hello from gCore!');
 
 // Access results - triggers flush if not already flushed
 echo "   Ping result: " . ($result1->get()['result'] ? 'OK' : 'FAIL') . "\n";
@@ -60,8 +60,8 @@ try {
     // 4. Invokes the service
     // 5. Queues for batching
 
-    $templateResult = $gsd->renderTemplate('mytemplate', [
-        'title' => 'gCore GSD Integration',
+    $templateResult = $gNode->renderTemplate('mytemplate', [
+        'title' => 'gCore gNode Integration',
         'content' => 'Auto-batching rocks!',
     ]);
 
@@ -80,14 +80,14 @@ echo "   Queueing 10 commands...\n\n";
 
 $results = [];
 for ($i = 0; $i < 10; $i++) {
-    $results[] = $gsd->echo("Message $i");
+    $results[] = $gNode->echo("Message $i");
 }
 
 echo "   All 10 commands queued\n";
 echo "   Manually flushing batch...\n\n";
 
 // Manual flush
-$flushedResults = $gsd->flush();
+$flushedResults = $gNode->flush();
 echo "   Flushed " . count($flushedResults) . " results\n";
 echo "   First result: " . json_encode($results[0]->get(), JSON_PRETTY_PRINT) . "\n\n";
 
@@ -97,7 +97,7 @@ echo "   First result: " . json_encode($results[0]->get(), JSON_PRETTY_PRINT) . 
 
 echo "4. Direct client access for advanced operations:\n\n";
 
-$client = $gsd->getClient();
+$client = $gNode->getClient();
 
 // Geometric discovery example
 $capabilities = [
@@ -115,7 +115,7 @@ echo "   Service IDs: " . json_encode($discoveredServices) . "\n\n";
 
 echo "5. Performance statistics:\n\n";
 
-$stats = $gsd->getProxyStats();
+$stats = $gNode->getProxyStats();
 echo "   Proxy Stats:\n";
 echo "   - Total calls: " . ($stats['calls'] ?? 0) . "\n";
 echo "   - Discoveries: " . ($stats['discoveries'] ?? 0) . "\n";
@@ -146,12 +146,12 @@ echo "6. Cache management:\n\n";
 
 // Warmup cache for common methods
 echo "   Warming up cache for common methods...\n";
-$warmedUp = $gsd->warmupCache(['renderTemplate', 'optimizeImage', 'parseMarkdown']);
+$warmedUp = $gNode->warmupCache(['renderTemplate', 'optimizeImage', 'parseMarkdown']);
 echo "   Pre-cached $warmedUp services\n\n";
 
 // Clear cache
 echo "   Clearing discovery cache...\n";
-$gsd->clearCache();
+$gNode->clearCache();
 echo "   Cache cleared\n\n";
 
 // ==================================================================
@@ -160,7 +160,7 @@ echo "   Cache cleared\n\n";
 
 echo "7. Service registry:\n\n";
 
-$registry = $gsd->getServiceRegistry();
+$registry = $gNode->getServiceRegistry();
 
 // Register custom method
 $registry->register('customService', [
@@ -180,10 +180,10 @@ echo "8. Error handling:\n\n";
 
 try {
     // Call unknown method
-    $result = $gsd->unknownMethod(['test' => 'data']);
+    $result = $gNode->unknownMethod(['test' => 'data']);
     $result->get(); // This will throw
 
-} catch (\gCore\GSD\Exception\GSDException $e) {
+} catch (\gCore\gNode\Exception\gNodeException $e) {
     echo "   Caught expected error: " . $e->getMessage() . "\n\n";
 }
 
@@ -195,6 +195,6 @@ echo "=== All examples completed ===\n\n";
 echo "Note: Any pending batched commands will be automatically flushed\n";
 echo "      when the script exits (via shutdown handler).\n\n";
 
-// The shutdown handler registered in ExternalGSDAdapter will
+// The shutdown handler registered in ExternalGNodeAdapter will
 // automatically flush any remaining batched commands.
 // No manual cleanup needed!

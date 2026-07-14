@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace gCore\GSD\Format;
+namespace gCore\gNode\Format;
 
-use gCore\GSD\Exception\GSDException;
+use gCore\gNode\Exception\gNodeException;
 
 /**
  * FormatSchema - JSONSchema validation and parsing
@@ -22,7 +22,7 @@ use gCore\GSD\Exception\GSDException;
  * - Enum values
  * - Format strings (basic support)
  *
- * @package gCore\GSD\Format
+ * @package gCore\gNode\Format
  */
 class FormatSchema
 {
@@ -40,17 +40,17 @@ class FormatSchema
      * FormatSchema constructor
      *
      * @param array $schema JSONSchema definition (draft-7 compliant)
-     * @throws GSDException if schema is invalid
+     * @throws gNodeException if schema is invalid
      */
     public function __construct(array $schema)
     {
         if (empty($schema)) {
-            throw new GSDException('Schema cannot be empty');
+            throw new gNodeException('Schema cannot be empty');
         }
 
         // Basic schema structure validation
         if (!isset($schema['type']) && !isset($schema['properties']) && !isset($schema['$ref'])) {
-            throw new GSDException('Schema must define "type", "properties", or "$ref"');
+            throw new gNodeException('Schema must define "type", "properties", or "$ref"');
         }
 
         $this->schema = $schema;
@@ -62,14 +62,14 @@ class FormatSchema
      *
      * @param string $json JSON-encoded schema
      * @return self
-     * @throws GSDException on JSON decode error or invalid schema
+     * @throws gNodeException on JSON decode error or invalid schema
      */
     public static function fromJson(string $json): self
     {
         $schema = json_decode($json, true);
 
         if (json_last_error() !== JSON_ERROR_NONE) {
-            throw new GSDException(
+            throw new gNodeException(
                 'Invalid JSON schema: ' . json_last_error_msg()
             );
         }
@@ -80,7 +80,7 @@ class FormatSchema
     /**
      * Validate data against schema
      *
-     * Performs comprehensive JSONSchema draft-7 validation.
+     * Performs JSONSchema draft-7 validation.
      * Returns array of validation errors (empty if valid).
      *
      * @param mixed $data Data to validate
@@ -98,14 +98,14 @@ class FormatSchema
      *
      * @param string $json JSON string to parse
      * @return mixed Parsed data
-     * @throws GSDException on JSON parse error or validation failure
+     * @throws gNodeException on JSON parse error or validation failure
      */
     public function parse(string $json)
     {
         $data = json_decode($json, true);
 
         if (json_last_error() !== JSON_ERROR_NONE) {
-            throw new GSDException(
+            throw new gNodeException(
                 'JSON parse error: ' . json_last_error_msg()
             );
         }
@@ -113,7 +113,7 @@ class FormatSchema
         $errors = $this->validate($data);
 
         if (!empty($errors)) {
-            throw new GSDException(
+            throw new gNodeException(
                 'Validation failed: ' . implode(', ', $errors)
             );
         }
@@ -188,7 +188,7 @@ class FormatSchema
     /**
      * Validate schema structure
      *
-     * @throws GSDException on invalid schema structure
+     * @throws gNodeException on invalid schema structure
      */
     private function validateSchemaStructure(): void
     {
@@ -200,28 +200,28 @@ class FormatSchema
             if (is_array($type)) {
                 foreach ($type as $t) {
                     if (!in_array($t, $validTypes, true)) {
-                        throw new GSDException("Invalid schema type: {$t}");
+                        throw new gNodeException("Invalid schema type: {$t}");
                     }
                 }
             } elseif (!in_array($type, $validTypes, true)) {
-                throw new GSDException("Invalid schema type: {$type}");
+                throw new gNodeException("Invalid schema type: {$type}");
             }
         }
 
         // Validate properties structure
         if (isset($this->schema['properties']) && !is_array($this->schema['properties'])) {
-            throw new GSDException('Schema "properties" must be an object');
+            throw new gNodeException('Schema "properties" must be an object');
         }
 
         // Validate required structure
         if (isset($this->schema['required'])) {
             if (!is_array($this->schema['required'])) {
-                throw new GSDException('Schema "required" must be an array');
+                throw new gNodeException('Schema "required" must be an array');
             }
 
             foreach ($this->schema['required'] as $field) {
                 if (!is_string($field)) {
-                    throw new GSDException('Schema "required" must contain strings');
+                    throw new gNodeException('Schema "required" must contain strings');
                 }
             }
         }

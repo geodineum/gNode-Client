@@ -1,16 +1,16 @@
 <?php
 /**
- * GSD Client Example
+ * gNode Client Example
  * 
- * This example demonstrates how to use the GSD client package.
+ * This example demonstrates how to use the gNode client package.
  */
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
-use gCore\GSD\Client;
-use gCore\GSD\Storage\ValKeyStorage;
-use gCore\GSD\Utils\IntegrationHelper;
-use gCore\GSD\Exception\GSDException;
+use gCore\gNode\Client;
+use gCore\gNode\Storage\ValKeyStorage;
+use gCore\gNode\Utils\IntegrationHelper;
+use gCore\gNode\Exception\gNodeException;
 
 // Example 1: Basic initialization
 function example1() {
@@ -18,10 +18,10 @@ function example1() {
         // Create ValKey storage
         $storage = new ValKeyStorage([
             'host' => '127.0.0.1',
-            'port' => 6379
+            'port' => 47445
         ]);
         
-        // Create GSD client
+        // Create gNode client
         $client = new Client(
             $storage,
             'default',       // site ID
@@ -34,13 +34,10 @@ function example1() {
         );
         
         // Check connection status
-        echo "Connected to GSD: " . ($client->isConnected() ? "Yes" : "No") . "\n";
+        echo "Connected to gNode: " . ($client->isConnected() ? "Yes" : "No") . "\n";
         echo "Using fallback: " . ($client->isUsingFallback() ? "Yes" : "No") . "\n";
         
         // Register capability dimensions
-        $client->registerCapabilityDimension('performance', 0);
-        $client->registerCapabilityDimension('reliability', 1);
-        $client->registerCapabilityDimension('memory', 2);
         
         // Register a service
         $client->registerService(
@@ -73,23 +70,23 @@ function example1() {
         $sequence = $client->getLoadSequence();
         echo "Load sequence: " . implode(' -> ', $sequence) . "\n";
         
-    } catch (GSDException $e) {
+    } catch (gNodeException $e) {
         echo "Error: " . $e->getMessage() . "\n";
     }
 }
 
 // Example 2: Using IntegrationHelper
 function example2() {
-    // Initialize GSD with auto-start
+    // Initialize gNode with auto-start
     $result = IntegrationHelper::initialize([
         'host' => '127.0.0.1',
-        'port' => 6379,
+        'port' => 47445,
         'site_id' => 'production',
-        'node_id' => 'gsd-main',
+        'node_id' => 'gnode-main',
         'client_id' => 'example-client',
         'debug' => true,
         'use_fallback' => true,
-        'daemon_path' => '/path/to/gsd-daemon'  // Set actual path here
+        'daemon_path' => '/path/to/gnode-daemon'  // Set actual path here
     ], true);
     
     echo "Initialization status: {$result['status']}\n";
@@ -102,7 +99,7 @@ function example2() {
         $client = $result['client'];
         
         // Use client as in example1
-        echo "Connected to GSD: " . ($client->isConnected() ? "Yes" : "No") . "\n";
+        echo "Connected to gNode: " . ($client->isConnected() ? "Yes" : "No") . "\n";
         echo "Using fallback: " . ($client->isUsingFallback() ? "Yes" : "No") . "\n";
     }
 }
@@ -113,10 +110,10 @@ function example3() {
         // Create ValKey storage
         $storage = new ValKeyStorage([
             'host' => '127.0.0.1',
-            'port' => 6379
+            'port' => 47445
         ]);
         
-        // Create GSD client
+        // Create gNode client
         $client = new Client(
             $storage,
             'default',
@@ -146,7 +143,7 @@ function example3() {
         
         echo "Batch operations result: " . $result . "\n";
         
-    } catch (GSDException $e) {
+    } catch (gNodeException $e) {
         echo "Error: " . $e->getMessage() . "\n";
     }
 }
@@ -157,10 +154,10 @@ function example4() {
         // Create ValKey storage
         $storage = new ValKeyStorage([
             'host' => '127.0.0.1',
-            'port' => 6379
+            'port' => 47445
         ]);
         
-        // Create GSD client
+        // Create gNode client
         $client = new Client(
             $storage,
             'default',
@@ -210,7 +207,7 @@ function example4() {
         
         echo "Consumer group read result: {$result}\n";
         
-    } catch (GSDException $e) {
+    } catch (gNodeException $e) {
         echo "Error: " . $e->getMessage() . "\n";
     }
 }

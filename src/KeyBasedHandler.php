@@ -1,21 +1,22 @@
 <?php
+declare(strict_types=1);
 
-namespace gCore\GSD;
+namespace gCore\gNode;
 
-use gCore\GSD\Storage\StorageInterface;
-use gCore\GSD\Exception\KeyBasedException;
+use gCore\gNode\Storage\StorageInterface;
+use gCore\gNode\Exception\KeyBasedException;
 
 /**
  * KeyBasedHandler - Handler for key-based ValKey operations
  *
- * Provides helper methods for key-based GSD operations:
+ * Provides helper methods for key-based gNode operations:
  * - Key generation with consistent patterns
  * - Atomic operations (get/set/publish)
  * - TTL management
  * - Pattern scanning
  * - Bundle operations
  *
- * @package gCore\GSD
+ * @package gCore\gNode
  * @version 2.0.0
  */
 class KeyBasedHandler
@@ -247,7 +248,9 @@ class KeyBasedHandler
     {
         ksort($parameters);
         $paramHash = md5(json_encode($parameters, JSON_UNESCAPED_SLASHES));
-        return "{$this->siteId}:cache:{$command}:{$paramHash}";
+        // Hash-tag braces keep a site's keys in one cluster slot (matches the
+        // daemon's build_request_key/build_response_key and getUnifiedStreamKey).
+        return "{{$this->siteId}}:cache:{$command}:{$paramHash}";
     }
 
     /**
@@ -258,7 +261,8 @@ class KeyBasedHandler
      */
     public function generateRequestKey(string $requestId): string
     {
-        return "{$this->siteId}:req:{$requestId}";
+        // Braced to match the daemon's build_request_key ({site}:req:{id}).
+        return "{{$this->siteId}}:req:{$requestId}";
     }
 
     /**
@@ -269,7 +273,8 @@ class KeyBasedHandler
      */
     public function generateResponseKey(string $requestId): string
     {
-        return "{$this->siteId}:res:{$requestId}";
+        // Braced to match the daemon's build_response_key ({site}:res:{id}).
+        return "{{$this->siteId}}:res:{$requestId}";
     }
 
     /**
@@ -281,7 +286,14 @@ class KeyBasedHandler
     public function getBundleKey(?string $variant = null): string
     {
         $variant = $variant ?? 'full';
-        return "{$this->siteId}:bundle:{$variant}";
+        // Braced for cluster-slot consistency. This is a SELF-CONTAINED cache:
+        // storeBundle()/retrieveBundle() write and read THIS same key with gzip
+        // (gzencode/gzdecode) — the ecosystem-standard framing (daemon
+        // asset_builder GzEncoder, gNodeClient gzdecode). It is a separate
+        // namespace from the daemon's manifest bundle
+        // (`{site}:gnode:bundle:{manifest_id}`); consuming those would need only
+        // the `:gnode:` key segment (the compression already matches).
+        return "{{$this->siteId}}:bundle:{$variant}";
     }
 
     /**
@@ -291,6 +303,9 @@ class KeyBasedHandler
      */
     public function getInvalidationChannel(): string
     {
+        // Pub/sub channel — intentionally UNbraced: the daemon subscribes to
+        // the bare `{site}:events:invalidate` (asset_builder.rs), and regular
+        // pub/sub is not slot-bound. Do NOT add hash-tag braces here.
         return "{$this->siteId}:events:invalidate";
     }
 
@@ -301,6 +316,8 @@ class KeyBasedHandler
      */
     public function getComputeRequestChannel(): string
     {
+        // Pub/sub channel — intentionally UNbraced, same rationale as
+        // getInvalidationChannel(). Do NOT add hash-tag braces here.
         return "{$this->siteId}:events:compute_request";
     }
 
@@ -320,7 +337,10 @@ class KeyBasedHandler
             throw KeyBasedException::jsonParseError(json_last_error_msg());
         }
 
-        $compressed = gzcompress($json, $compressionLevel);
+        // gzip framing — the ecosystem standard (daemon asset_builder GzEncoder,
+        // gNodeClient gzdecode). Keep it gzip so this cache never diverges from
+        // the rest of the stack.
+        $compressed = gzencode($json, $compressionLevel);
         if ($compressed === false) {
             throw new KeyBasedException("Bundle compression failed");
         }
@@ -353,7 +373,7 @@ class KeyBasedHandler
             return null;
         }
 
-        $json = @gzuncompress($compressed);
+        $json = @gzdecode($compressed);
         if ($json === false) {
             throw KeyBasedException::decompressionFailed($this->siteId);
         }
@@ -373,7 +393,9 @@ class KeyBasedHandler
      */
     public function getStats(): array
     {
-        $pattern = "{$this->siteId}:*";
+        // Braced to match the braced data keys above (cache/req/res/bundle);
+        // the unbraced `:events:` pub/sub channels are not keyspace entries.
+        $pattern = "{{$this->siteId}}:*";
         $keys = $this->scan($pattern);
 
         $cacheKeys = 0;
@@ -422,8 +444,8 @@ class KeyBasedHandler
     public function cleanupStaleKeys(int $olderThanSeconds = 60): int
     {
         $patterns = [
-            "{$this->siteId}:req:*",
-            "{$this->siteId}:res:*"
+            "{{$this->siteId}}:req:*",
+            "{{$this->siteId}}:res:*"
         ];
 
         $deleted = 0;

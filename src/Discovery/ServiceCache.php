@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 /**
  * ServiceCache - LRU-TTL cache for discovered services
  *
@@ -14,10 +15,10 @@
  * - Automatic cleanup on access
  * - Minimal memory overhead (~200 bytes per entry)
  *
- * @package gCore\GSD\Discovery
+ * @package gCore\gNode\Discovery
  */
 
-namespace gCore\GSD\Discovery;
+namespace gCore\gNode\Discovery;
 
 class ServiceCache
 {
