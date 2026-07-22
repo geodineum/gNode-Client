@@ -234,6 +234,10 @@ class gNodeClient implements gNodeClientInterface
     public const TTL_CACHE_LONG = 86400;     // Long-lived cache: 24 hours
     public const TTL_SESSION = 1800;         // Session data: 30 minutes
     public const TTL_MAX = 2592000;          // Maximum TTL: 30 days (86400 * 30)
+    // Daily analytics rollups. Matches the ~81-day expiry already carried by
+    // the pageviews/visits/referrers/visitors family, so the whole metrics
+    // namespace ages out together instead of one member leaking.
+    public const METRICS_TTL_SECONDS = 7005600; // 81 days
 
     //=========================================================================
     // CONSTRUCTOR & FACTORY METHODS
@@ -982,8 +986,9 @@ class gNodeClient implements gNodeClientInterface
      *   - INCR {site_id}:metrics:requests:fcalls:<function>
      *   - PFADD {site_id}:metrics:clients:hll:YYYY-MM-DD <client_fingerprint>
      *
-     * The HLL key rotates daily; clients of disk-cleanup tooling can
-     * keep N days and drop the rest.
+     * The HLL key rotates daily and is expired at METRICS_TTL_SECONDS, matching
+     * the rest of the metrics family. Retention is this writer's
+     * responsibility: nothing else sweeps these.
      */
     private function recordFcallMetrics(string $function): void
     {
@@ -1000,10 +1005,13 @@ class gNodeClient implements gNodeClientInterface
             $client = $this->resolveClientFingerprint();
             if ($client !== '') {
                 $day = gmdate('Y-m-d');
-                $this->storage->pfAdd(
-                    '{' . $site . '}:metrics:clients:hll:' . $day,
-                    [$client]
-                );
+                $hllKey = '{' . $site . '}:metrics:clients:hll:' . $day;
+                $this->storage->pfAdd($hllKey, [$client]);
+                // One new key per site per day, so it MUST carry a TTL or it
+                // leaks forever. Every sibling in this family already expires
+                // at ~81 days; this key was missed when those were applied and
+                // was found with ttl = -1 across 250 live keys.
+                $this->storage->expire($hllKey, self::METRICS_TTL_SECONDS);
             }
         } catch (\Throwable $e) {
             // Instrumentation is best-effort — never let a metrics write
