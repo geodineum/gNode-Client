@@ -626,8 +626,12 @@ class gNodeClient implements gNodeClientInterface
     /**
      * Ensure consumer groups exist for the site's streams
      *
-     * Creates gnode-daemon and gnode-client consumer groups on unified and health streams.
-     * This is idempotent - safe to call multiple times.
+     * Creates the gnode-daemon command consumer group on unified and health
+     * streams. This is idempotent - safe to call multiple times.
+     *
+     * Note: gnode-client (the former response group) is retired. Responses are
+     * delivered by keyed rendezvous ({ss}:res:{id}), not through a consumer
+     * group, so no response group is created.
      *
      * @return array Result with created/existing groups
      * @api
@@ -635,7 +639,7 @@ class gNodeClient implements gNodeClientInterface
     public function ensureConsumerGroups(): array
     {
         $results = [];
-        $groups = ['gnode-daemon', 'gnode-client'];
+        $groups = ['gnode-daemon'];
 
         $streams = [
             'unified' => $this->unifiedStream,
@@ -681,7 +685,6 @@ class gNodeClient implements gNodeClientInterface
             ],
             'consumer_groups' => [
                 'daemon' => 'gnode-daemon',
-                'client' => 'gnode-client',
             ],
             'connected' => $this->connected,
             'using_fallback' => $this->usingFallback,
