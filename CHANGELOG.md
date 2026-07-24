@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.1 — 2026-07-24
+
+Everything under "Unreleased" below ships in 0.1.1. Wire notes for this
+release across the ecosystem:
+
+- NEW wire surface (gNode): signed receipt stream `{site}:gnode:receipts:{env}`
+  — an ed25519-signed durable receipt XADDed beside every keyed
+  `{ss}:res:{id}` reply (fail-closed; body by reference + sha256). Verifier
+  pubkeys at `{topology_ns}:gnode:receipt_pubkeys` (field = signer
+  fingerprint, value = `alg:pubkey_hex`). Additive: the keyed reply and the
+  legacy `t=r`/`br` stream entries are unchanged in this release.
+- RETIRED (this repo): the `gnode-client` response consumer group is no longer
+  created; response delivery is keyed-rendezvous only. The daemon stays
+  tolerant of older clients.
+
 ## Unreleased
 
 ### Removed
