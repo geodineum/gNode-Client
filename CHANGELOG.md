@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.2 — unreleased
+
+### Fixed
+- `trackMetric()` no longer sends an empty string in the `extra_json` slot of
+  `GNODE_MONITORING_TRACK_METRIC`. Lua treats `''` as present, so the daemon
+  rejected every call with `Invalid JSON for extra data` — metric detail has
+  been silently absent and every client init logged the failure. The argument
+  is now omitted when there is no extra data, matching the contract in
+  `COMMAND_SCHEMA.md`. The Lua side was fixed in the same change to treat an
+  empty argument as absent, so old and new clients both work.
+
 ## 0.1.1 — 2026-07-24
 
 Everything under "Unreleased" below ships in 0.1.1. Wire notes for this

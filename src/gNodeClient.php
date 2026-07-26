@@ -3977,12 +3977,15 @@ class gNodeClient implements gNodeClientInterface
         }
 
         try {
-            $extraJson = !empty($extra) ? json_encode($extra) : '';
+            $args = [$this->siteId, $metricType, $value];
+            if (!empty($extra)) {
+                $args[] = json_encode($extra);
+            }
 
             $this->storage->fcall(
                 'GNODE_MONITORING_TRACK_METRIC',
                 [],
-                [$this->siteId, $metricType, $value, $extraJson]
+                $args
             );
 
             return true;
