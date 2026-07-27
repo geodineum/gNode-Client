@@ -22,7 +22,25 @@ MISSION_*.md
 AUDIT_*.md
 
 # Tests (optional - remove if you want tests tracked)
-/tests/
+/tests/*
+!/tests/Unit/
+/tests/Unit/*
+
+# …EXCEPT the receipt vector test and its fixture. Those are not "tests" in the
+# optional sense — they ARE the wire contract. The receipt format has several
+# independent implementations that cannot share code across a language boundary
+# (gNode + Geodineum-COMMS in Rust, this one in PHP, SB-8.88's Python/C/TS to
+# come), so the shared vectors are the only thing keeping them aligned. An
+# untracked contract test is not a contract test: it would not travel, would not
+# run anywhere but one laptop, and the drift it exists to catch would be found
+# in production as a signature failure that reads as tampering.
+#
+# Same reasoning as the !CONTRACT.scn.md negation above: the contract travels
+# even when the surrounding category does not. Note the negation needs
+# /tests/* rather than /tests/, because git will not descend into an ignored
+# DIRECTORY to find a re-included file.
+!/tests/receipt-vectors.json
+!/tests/Unit/ReceiptVectorsTest.php
 
 # Credentials and secrets
 /.gnode/
