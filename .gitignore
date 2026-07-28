@@ -21,35 +21,19 @@ SESSION_*.md
 MISSION_*.md
 AUDIT_*.md
 
-# Tests (optional - remove if you want tests tracked)
-/tests/*
-!/tests/Unit/
-/tests/Unit/*
-
-# …EXCEPT the receipt vector test and its fixture. Those are not "tests" in the
-# optional sense — they ARE the wire contract. The receipt format has several
-# independent implementations that cannot share code across a language boundary
-# (gNode + Geodineum-COMMS in Rust, this one in PHP, SB-8.88's Python/C/TS to
-# come), so the shared vectors are the only thing keeping them aligned. An
-# untracked contract test is not a contract test: it would not travel, would not
-# run anywhere but one laptop, and the drift it exists to catch would be found
-# in production as a signature failure that reads as tampering.
+# Unit tests ARE tracked.
 #
-# Same reasoning as the !CONTRACT.scn.md negation above: the contract travels
-# even when the surrounding category does not. Note the negation needs
-# /tests/* rather than /tests/, because git will not descend into an ignored
-# DIRECTORY to find a re-included file.
-!/tests/receipt-vectors.json
-!/tests/Unit/ReceiptVectorsTest.php
-# …and the capability-routing selection test, on the same reasoning: it decides
-# WHICH MACHINE work goes to, so a regression here does not fail loudly, it
-# quietly sends work somewhere it was not meant to go.
+# They were not, and the exception list had reached three: the receipt vectors
+# (the wire contract across four language implementations), the capability
+# routing test (it decides which machine work goes to), and now schema
+# resolution (it decides which dimension index a capability lands in). Each was
+# argued individually as "not a test in the optional sense". At three, the rule
+# is wrong rather than the exceptions: every test worth writing in a client
+# library is about a contract with something it cannot see.
 #
-# NOTE: this is now the second exception to a blanket "/tests/ is ignored" that
-# predates both. Adding them one at a time is not a policy — the repo tracks no
-# tests at all, which is worth an explicit decision rather than a growing list
-# of negations.
-!/tests/Unit/CapRouteTest.php
+# Integration tests stay ignored — they need a live daemon and a populated
+# ValKey, so they cannot run for anyone who checks this out.
+/tests/Integration/
 
 # Credentials and secrets
 /.gnode/

@@ -383,6 +383,26 @@ class ValKeyStorage implements StorageInterface
 
     /**
      * {@inheritdoc}
+     * @api
+     */
+    public function fcallRo(string $function, array $keys, array $args)
+    {
+        return $this->withRetry(function () use ($function, $keys, $args) {
+            $scalarArgs = array_map(function ($arg) {
+                if (is_array($arg) || is_object($arg)) {
+                    return json_encode($arg);
+                }
+                return $arg;
+            }, $args);
+
+            $command = ['FCALL_RO', $function, count($keys)];
+            $command = array_merge($command, $keys, $scalarArgs);
+            return $this->redis->rawCommand(...$command);
+        }, 'FCALL_RO');
+    }
+
+    /**
+     * {@inheritdoc}
      */
     public function xGroupCreate(string $key, string $group, string $id, bool $mkStream = false): bool
     {

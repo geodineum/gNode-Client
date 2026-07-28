@@ -143,6 +143,20 @@ interface StorageInterface
     public function fcall(string $function, array $keys, array $args);
 
     /**
+     * Call a read-only Redis function (FCALL_RO)
+     *
+     * Only valid for functions registered with the `no-writes` flag. Distinct
+     * from fcall() because FCALL_RO is permitted on a replica, so read paths
+     * that use it do not have to reach the master.
+     *
+     * @param string $function Function name
+     * @param array $keys Keys to pass to the function
+     * @param array $args Arguments to pass to the function
+     * @return mixed Function result
+     */
+    public function fcallRo(string $function, array $keys, array $args);
+
+    /**
      * Create a stream consumer group
      *
      * @param string $key Stream key

@@ -118,6 +118,40 @@ class gNodeClient implements gNodeClientInterface
      */
     protected $topologyNamespace = 'geodineum';
 
+    /**
+     * Per-request cache of fetched capability schemas, keyed by tier.
+     * The schema cannot change under a running daemon, so re-reading it on a
+     * hot path buys nothing.
+     * @var array<string, array>
+     */
+    protected $schemaCache = [];
+
+    /**
+     * Last-resort dimension counts, used ONLY when the daemon has published no
+     * schema. These mirror daemon/config/*_schema.yaml at the time of writing
+     * and are exactly the thing that goes stale — which is why
+     * capabilityDimensionCount() logs whenever it falls back to them rather
+     * than quietly returning a plausible number.
+     */
+    protected const FALLBACK_DIMENSIONS = [
+        'service'       => 30,
+        'tool'          => 16,
+        'constellation' => 20,
+        'galaxy'        => 20,
+    ];
+
+    /**
+     * The discovery subset of the above — the dimensions that take part in
+     * bucket-key hashing. Never equal to the total, and confusing the two is
+     * silent: too wide a key simply matches nothing.
+     */
+    protected const FALLBACK_DISCOVERY_DIMENSIONS = [
+        'service'       => 25,
+        'tool'          => 12,
+        'constellation' => 16,
+        'galaxy'        => 16,
+    ];
+
     /** @var array Configuration */
     protected $config;
 
@@ -1810,10 +1844,22 @@ class gNodeClient implements gNodeClientInterface
      */
     public function getCapabilityDimensions(): array
     {
+        // The published schema first — same map, one round trip, and it is the
+        // one the daemon matches against.
+        $published = $this->getPublishedCapabilitySchema();
+        if (!empty($published['dimension_index'])) {
+            $this->capabilityDimensions = $published['dimension_index'];
+            return $this->capabilityDimensions;
+        }
+
         $response = $this->sendCommand('geometric_dimensions', []);
 
         if ($response && isset($response['status']) && $response['status'] === 'ok') {
-            $this->capabilityDimensions = $response['result'] ?? [];
+            // is_array, not ?? — a daemon that answers ok with a scalar result
+            // assigned straight through and raised a TypeError from the return
+            // type, turning a malformed reply into a fatal in the caller.
+            $result = $response['result'] ?? null;
+            $this->capabilityDimensions = is_array($result) ? $result : [];
             return $this->capabilityDimensions;
         }
 
@@ -1842,9 +1888,8 @@ class gNodeClient implements gNodeClientInterface
      */
     protected function getDimensionIndex(string $name): int
     {
-        // 23-dimension semantic topology schema (v2.0)
-        // Discovery dims 0-18: used for bucket key hashing (76 chars)
-        // Storage-only dims 19-22: visual topology + temporal
+        // Fallback only — see below. Frozen at the v2.0 23-dimension layout; the
+        // daemon's service tier is now 30 and six of these indices have moved.
         $static = [
             // Layer 1: Interface Identity (0-3)
             'protocol' => 0,
@@ -1880,6 +1925,21 @@ class gNodeClient implements gNodeClientInterface
             // Layer 10: Temporal (22)
             'registration_order' => 22,
         ];
+
+        // The daemon first, the table second — and in that order deliberately.
+        // This index goes on the wire: discoverRange() sends it as the key of a
+        // range requirement, so the daemon dereferences OUR number against ITS
+        // schema. The table above has service_tier at 17 where the daemon has
+        // health_status, so a range query on service_tier silently constrained
+        // an unrelated dimension and returned confidently wrong matches.
+        $published = $this->getPublishedCapabilitySchema();
+        if (isset($published['dimension_index'][$name])) {
+            $i = (int) $published['dimension_index'][$name];
+            if (isset($static[$name]) && $static[$name] !== $i) {
+                $this->debug("dimension '{$name}': built-in index {$static[$name]}, daemon says {$i} — using {$i}");
+            }
+            return $i;
+        }
 
         if (isset($static[$name])) {
             return $static[$name];
@@ -4364,6 +4424,175 @@ class gNodeClient implements gNodeClientInterface
     }
 
     /**
+     * The capability schema the daemon is ACTUALLY matching against.
+     *
+     * The dimension count is per TIER by design — service 30, tool 16,
+     * constellation and galaxy 20, each with its own discovery subset — and that
+     * is fine. What was not fine is that every consumer kept a private copy of
+     * the answer: counts of 8, 9, 12, 16, 19, 23 and 25 were all present across
+     * this ecosystem at once, several stale by months, and nothing could tell
+     * you which was true without reading the daemon's YAML.
+     *
+     * So ask. The master publishes the schema it loaded; this reads it back, and
+     * a caller that uses it cannot disagree with the daemon by construction.
+     *
+     * Returns `total_dimensions`, `discovery_dimensions`, `schema_version`,
+     * `tier`, `source` (the file it came from), and `dimension_index` — the
+     * name→index map. The count alone will not let you build a coordinate
+     * vector; the index each named capability occupies is the part that drifts.
+     *
+     * Cached per request: this is read on hot paths and the schema does not
+     * change under a running daemon.
+     *
+     * @param string $tier service|tool|constellation|galaxy
+     * @return array|null Schema, or null when nothing is published yet
+     */
+    public function getPublishedCapabilitySchema(string $tier = 'service'): ?array
+    {
+        if (isset($this->schemaCache[$tier])) {
+            return $this->schemaCache[$tier];
+        }
+
+        try {
+            $flat = $this->storage->fcallRo(
+                'GNODE_SCHEMA_GET',
+                [],
+                [$this->topologyNamespace, $tier]
+            );
+        } catch (\Throwable $e) {
+            // Not published yet, or an older daemon without the function.
+            // Absent is a legitimate answer here, not a failure.
+            $this->debug("capability schema unavailable for tier {$tier}: {$e->getMessage()}");
+            return null;
+        }
+
+        if (!is_array($flat) || $flat === []) {
+            return null;
+        }
+
+        // HGETALL comes back flat: field, value, field, value…
+        $schema = [];
+        for ($i = 0; $i + 1 < count($flat); $i += 2) {
+            $schema[(string) $flat[$i]] = $flat[$i + 1];
+        }
+        foreach (['dimension_index', 'dimension_values'] as $j) {
+            if (isset($schema[$j])) {
+                $decoded = json_decode((string) $schema[$j], true);
+                if (is_array($decoded)) {
+                    $schema[$j] = $decoded;
+                }
+            }
+        }
+        foreach (['total_dimensions', 'discovery_dimensions'] as $n) {
+            if (isset($schema[$n])) {
+                $schema[$n] = (int) $schema[$n];
+            }
+        }
+
+        $this->schemaCache[$tier] = $schema;
+
+        return $schema;
+    }
+
+    /**
+     * How many dimensions does this tier have, according to the daemon?
+     *
+     * Falls back to the built-in default when nothing is published — and SAYS SO
+     * in the debug log rather than returning a number that looks authoritative.
+     * A silently-wrong dimension count produces coordinate vectors of the wrong
+     * width, which fails as poor match quality rather than as an error, so the
+     * fallback being visible matters more than it usually would.
+     *
+     * @param string $tier service|tool|constellation|galaxy
+     * @return int Dimension count
+     */
+    public function capabilityDimensionCount(string $tier = 'service'): int
+    {
+        $schema = $this->getPublishedCapabilitySchema($tier);
+        if ($schema !== null && !empty($schema['total_dimensions'])) {
+            return (int) $schema['total_dimensions'];
+        }
+
+        $fallback = self::FALLBACK_DIMENSIONS[$tier] ?? self::FALLBACK_DIMENSIONS['service'];
+        $this->debug(
+            "capability schema not published for tier {$tier}; using built-in fallback "
+            . "{$fallback}. This is the number that goes stale — if it disagrees with "
+            . "the daemon, discovery quality degrades silently."
+        );
+
+        return $fallback;
+    }
+
+    /**
+     * How many of this tier's dimensions take part in discovery?
+     *
+     * Distinct from capabilityDimensionCount(): service is 30 dimensions of
+     * which 25 are discovery, the remaining 5 being storage-only (visual
+     * topology and registration order). Passing the total where discovery is
+     * wanted widens the bucket key and matches nothing.
+     *
+     * @param string $tier service|tool|constellation|galaxy
+     * @return int Discovery dimension count
+     */
+    public function capabilityDiscoveryWidth(string $tier = 'service'): int
+    {
+        $schema = $this->getPublishedCapabilitySchema($tier);
+        if ($schema !== null && !empty($schema['discovery_dimensions'])) {
+            return (int) $schema['discovery_dimensions'];
+        }
+
+        return self::FALLBACK_DISCOVERY_DIMENSIONS[$tier]
+            ?? self::FALLBACK_DISCOVERY_DIMENSIONS['service'];
+    }
+
+    /**
+     * The schema to actually translate against: published if there is one,
+     * built-in if not.
+     *
+     * Returns the built-in shape either way — `dimensions[name]['index']` and
+     * `['values']`, plus `total_dimensions` — so callers do not branch on where
+     * it came from. Only the numbers change, which is the entire point.
+     *
+     * When both exist and their indices disagree, that is logged per dimension.
+     * The published one wins: it is what the daemon is matching against, so a
+     * client that "corrects" it toward its own copy is just wrong in private.
+     *
+     * @param string $tier service|tool|constellation|galaxy
+     * @return array Schema in built-in shape
+     */
+    protected function resolveCapabilitySchema(string $tier = 'service'): array
+    {
+        $builtin = self::getBuiltinCapabilitySchema();
+        $published = $this->getPublishedCapabilitySchema($tier);
+
+        $index = $published['dimension_index'] ?? null;
+        if (!is_array($index) || $index === []) {
+            $this->debug(
+                "no published {$tier} schema; translating against the built-in copy, "
+                . "which is known to disagree with the daemon on seven dimensions"
+            );
+            return $builtin;
+        }
+
+        $values = $published['dimension_values'] ?? [];
+        $out = ['dimensions' => []];
+        foreach ($index as $name => $i) {
+            $out['dimensions'][$name] = [
+                'index'  => (int) $i,
+                'values' => $values[$name] ?? ($builtin['dimensions'][$name]['values'] ?? []),
+            ];
+            $was = $builtin['dimensions'][$name]['index'] ?? null;
+            if ($was !== null && (int) $was !== (int) $i) {
+                $this->debug("dimension '{$name}': built-in index {$was}, daemon says {$i} — using {$i}");
+            }
+        }
+        $out['total_dimensions'] = (int) ($published['total_dimensions'] ?? count($index));
+        $out['schema_version'] = $published['schema_version'] ?? null;
+
+        return $out;
+    }
+
+    /**
      * Which services could handle this work, best first?
      *
      * The read-only half of sendCommandToCapable(), for callers that want to see
@@ -4426,7 +4655,7 @@ class gNodeClient implements gNodeClientInterface
         // Translate human-readable capability names (e.g., 'http_rest') to numeric coordinates (e.g., 0.10)
         // The daemon expects HashMap<String, f64> — dimension names with float values
         $numericCapabilities = [];
-        $schema = self::getCapabilitySchema();
+        $schema = $this->resolveCapabilitySchema();
         foreach ($capabilities as $name => $value) {
             if (is_numeric($value)) {
                 $numericCapabilities[$name] = (float)$value;
@@ -4445,6 +4674,17 @@ class gNodeClient implements gNodeClientInterface
                     $this->debug("Unknown capability value '{$value}' for dimension '{$name}', defaulting to 0.0");
                     $numericCapabilities[$name] = 0.0;
                 }
+            } else {
+                // Previously this branch did not exist: an unrecognised dimension
+                // was dropped from the registration silently. With the built-in
+                // schema missing seven of the daemon's dimensions, that meant a
+                // service could ask for network_zone or deployment_model and
+                // register without it, then never match a query that required it.
+                $this->debug(
+                    "Dimension '{$name}' is not in the schema being translated against "
+                    . "(source: " . ($schema['schema_version'] ?? 'built-in') . "); "
+                    . "DROPPED from this registration"
+                );
             }
         }
 
@@ -6256,18 +6496,28 @@ class gNodeClient implements gNodeClientInterface
     //=========================================================================
 
     /**
-     * Get the full capability schema with human-readable value mappings
+     * The BUILT-IN capability vocabulary — a fallback, not the truth.
      *
-     * This is the canonical 23-dimension semantic topology schema.
-     * Use this to understand what values are valid for each dimension.
+     * This used to describe itself as "the canonical 23-dimension semantic
+     * topology schema". It is not canonical and has not been for some time. The
+     * daemon's service tier carries 30 dimensions, and this copy disagrees with
+     * it in ways that matter:
      *
-     * Dimensions 0-18: Discovery dimensions (used for bucket key hashing)
-     * Dimensions 19-21: Visual topology (user_x, user_y, user_z) - storage-only
-     * Dimension 22: Temporal (registration_order) - storage-only, auto-injected
+     *   - seven dimensions are missing entirely (health_status, lifecycle_state,
+     *     implementation_language, network_zone, data_persistence,
+     *     update_channel, deployment_model)
+     *   - six indices are wrong: service_tier is 17 here and 19 there,
+     *     environment 18 vs 20, user_x/y/z 19/20/21 vs 25/26/27, and
+     *     registration_order 22 vs 29
      *
-     * @return array Full schema with dimensions and value mappings
+     * Prefer getPublishedCapabilitySchema(), which asks the daemon. This exists
+     * for the case where nothing is published yet — an old daemon, or a client
+     * that starts before the master does — and for its value vocabulary, which
+     * is still correct for the dimensions it does know about.
+     *
+     * @return array Dimension definitions with value mappings
      */
-    public static function getCapabilitySchema(): array
+    public static function getBuiltinCapabilitySchema(): array
     {
         return [
             'schema_version' => '2.0',
@@ -6570,13 +6820,17 @@ class gNodeClient implements gNodeClientInterface
     }
 
     /**
-     * Auto-inject classification dimensions (17-18) from metadata
+     * Auto-inject the service_tier and environment classification dimensions.
      *
-     * Converts metadata tier/environment strings to geometric coordinates:
-     * - Dimension 17 (service_tier): TOOL=0.10, SERVICE=0.30, FORUM=0.50, AQUEDUCT=0.70, ROME=0.90
-     * - Dimension 18 (environment): global=0.00, testing=0.25, staging=0.50, acceptance=0.75, production=1.00
+     * Injected BY NAME, which is why this kept working while the index comments
+     * here rotted — they said 17 and 18; the daemon has had them at 19 and 20
+     * for a while. The daemon resolves names to indices itself, so no coordinate
+     * ever landed in the wrong slot through this path.
      *
-     * This ensures all services use the 23-dimension schema for proper geometric discovery.
+     * The float vocabulary below is a third private copy of the daemon's, and it
+     * still agrees with service_schema.yaml value for value. Left inline
+     * deliberately: this runs before any schema fetch can be trusted, so it must
+     * work with no daemon reachable.
      *
      * @param array $capabilities Existing capability vector
      * @param array $metadata Service metadata (may contain 'tier' and 'environment')
@@ -6584,7 +6838,7 @@ class gNodeClient implements gNodeClientInterface
      */
     private function injectClassificationDimensions(array $capabilities, array $metadata): array
     {
-        // Tier coordinates (dimension 17)
+        // Tier coordinates
         static $tierCoordinates = [
             'TOOL' => 0.10,
             'SERVICE' => 0.30,
@@ -6597,7 +6851,7 @@ class gNodeClient implements gNodeClientInterface
             'ROME' => 0.90,
         ];
 
-        // Environment coordinates (dimension 18)
+        // Environment coordinates
         static $envCoordinates = [
             'global' => 0.00,
             'testing' => 0.25,
@@ -6645,13 +6899,17 @@ class gNodeClient implements gNodeClientInterface
     /**
      * Translate human-readable capability names to geometric coordinates
      *
+     * Width comes from the schema, not from a literal. It was 23 here while the
+     * daemon's service tier was 30, so five dimensions had nowhere to land.
+     *
      * @param array $capabilities Associative array of dimension_name => value_name
-     * @return array Array of 23 float coordinates (0.0-1.0) - 19 discovery + 3 visual + 1 temporal
+     * @return array Float coordinates (0.0-1.0), one per dimension of the tier
      */
     public function translateCapabilitiesToCoordinates(array $capabilities): array
     {
-        $schema = self::getCapabilitySchema();
-        $coordinates = array_fill(0, 23, 0.0); // 23 dimensions (0-22)
+        $schema = $this->resolveCapabilitySchema();
+        $width = (int) ($schema['total_dimensions'] ?? count($schema['dimensions'] ?? []));
+        $coordinates = array_fill(0, max($width, 1), 0.0);
 
         foreach ($capabilities as $dimensionName => $valueName) {
             if (!isset($schema['dimensions'][$dimensionName])) {
@@ -6689,12 +6947,12 @@ class gNodeClient implements gNodeClientInterface
     /**
      * Translate geometric coordinates back to human-readable capability names
      *
-     * @param array $coordinates Array of 23 float coordinates
+     * @param array $coordinates Float coordinates, one per dimension of the tier
      * @return array Associative array of dimension_name => value_name (closest match)
      */
     public function translateCoordinatesToHuman(array $coordinates): array
     {
-        $schema = self::getCapabilitySchema();
+        $schema = $this->resolveCapabilitySchema();
         $result = [];
 
         foreach ($schema['dimensions'] as $dimensionName => $dimension) {
@@ -6785,12 +7043,19 @@ class gNodeClient implements gNodeClientInterface
                 // Complex constraint - will be handled by discoverRange
                 continue;
             }
+            // One lookup, used for both sides. Reading $coords at a different
+            // index than the one written to would pick up a neighbouring
+            // dimension's value, so these must not be resolved independently.
+            $idx = $this->getDimensionIndex($dimension);
             $coords = $this->translateCapabilitiesToCoordinates([$dimension => $value]);
-            $coordinates[$this->getDimensionIndex($dimension)] = $coords[$this->getDimensionIndex($dimension)];
+            $coordinates[$idx] = $coords[$idx] ?? 0.0;
         }
 
         // Use geometric discovery
-        $services = $this->geometricDiscover($coordinates, $limit, 17, 0);
+        // Discovery width from the schema. The literal 17 here matched neither
+        // the old 19 discovery dimensions nor the current 25 — it was a third
+        // number, agreeing with nothing.
+        $services = $this->geometricDiscover($coordinates, $limit, $this->capabilityDiscoveryWidth(), 0);
 
         // Enrich results with human-readable capabilities
         $enriched = [];
