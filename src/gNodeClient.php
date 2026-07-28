@@ -4269,6 +4269,124 @@ class gNodeClient implements gNodeClientInterface
     //=========================================================================
     // SERVICE REGISTRATION & DISCOVERY
     //=========================================================================
+    /**
+     * Send a command to whichever service can actually do the work.
+     *
+     * The producer says WHAT it needs, not WHICH machine — discovery answers
+     * "who can do this" against the capability space, and the relay delivers.
+     * Both halves already existed and were simply never joined up; callers were
+     * hard-coding a target site, which is why adding a node meant editing
+     * producers.
+     *
+     * Capability, not a routing hint. A node's abilities live in the topology as
+     * DIMENSIONS with magnitudes, so "an inference host with at least this much
+     * memory" is expressible and resolves to the better of two GPU boxes. A flat
+     * hint string cannot say how MUCH of a capability a node has, which is why
+     * the `_gh`/node-type mechanism was never going to answer this question and
+     * is documented as unenforced rather than finished.
+     *
+     * Delivery is at-least-once via the relay path, and the reply comes back
+     * through the same correlation the caller already uses — routing is a
+     * targeting decision, not a different protocol.
+     *
+     *   $client->sendCommandToCapable('infer',
+     *       ['prompt' => $text],
+     *       ['domain_primary' => 'compute', 'latency_class' => 'interactive']);
+     *
+     * @param string $command    Command name
+     * @param array  $parameters Command parameters
+     * @param array  $requirements Capability requirements (human-readable names
+     *                             or coordinates, same vocabulary as
+     *                             registerService)
+     * @param array  $opts       'exclude_self' (bool, default true),
+     *                           'candidate'    (int, default 0 — pick the Nth
+     *                                           best, for deliberate spillover)
+     * @return array Response, or an error array naming what was unsatisfiable
+     */
+    public function sendCommandToCapable(
+        string $command,
+        array $parameters = [],
+        array $requirements = [],
+        array $opts = []
+    ): array {
+        if (empty($requirements)) {
+            return ['success' => false,
+                    'error' => 'sendCommandToCapable() requires capability requirements; '
+                             . 'use sendCommand() when the target is already known'];
+        }
+
+        $candidates = $this->findServices($requirements);
+        if (empty($candidates)) {
+            // Deliberately NOT falling back to local execution. A silent
+            // fallback turns "no node can do this" into "the wrong node did it
+            // slowly", which is the failure that is hardest to see afterwards.
+            return ['success' => false,
+                    'error' => 'no service matches the requested capabilities',
+                    'requirements' => $requirements];
+        }
+
+        $excludeSelf = $opts['exclude_self'] ?? true;
+        $wanted = max(0, (int) ($opts['candidate'] ?? 0));
+
+        $viable = [];
+        foreach ($candidates as $c) {
+            $id = $c['id'] ?? $c['service_id'] ?? $c['name'] ?? null;
+            if ($id === null) {
+                continue;
+            }
+            if ($excludeSelf && $id === $this->siteId) {
+                continue;
+            }
+            $viable[] = $id;
+        }
+
+        if (empty($viable)) {
+            return ['success' => false,
+                    'error' => $excludeSelf
+                        ? 'the only capable service is this one; pass exclude_self=false to run it here'
+                        : 'capable services were found but none carried a usable id',
+                    'requirements' => $requirements];
+        }
+
+        // findServices returns best-first. `candidate` selects deliberately
+        // further down that ordering rather than silently, so spilling to a
+        // second-choice node is a decision in the caller, not a surprise.
+        $target = $viable[min($wanted, count($viable) - 1)];
+
+        $this->debug(sprintf(
+            'capability routing: %d candidate(s), targeting %s for %s',
+            count($viable), $target, $command
+        ));
+
+        // `_rt` is the relay target the daemon resolves; `_rr` is filled in by
+        // the daemon so the reply comes back here.
+        return $this->sendRawCommand($command, $parameters, ['_rt' => $target]);
+    }
+
+    /**
+     * Which services could handle this work, best first?
+     *
+     * The read-only half of sendCommandToCapable(), for callers that want to see
+     * or log the choice before making it — or to confirm a node they just added
+     * is actually visible to routing, which is otherwise only observable by
+     * sending real work at it.
+     *
+     * @param array $requirements Capability requirements
+     * @return array<int, string> Service ids, best match first
+     */
+    public function findCapableTargets(array $requirements): array
+    {
+        $out = [];
+        foreach ($this->findServices($requirements) as $c) {
+            $id = $c['id'] ?? $c['service_id'] ?? $c['name'] ?? null;
+            if ($id !== null) {
+                $out[] = $id;
+            }
+        }
+
+        return $out;
+    }
+
 
     /**
      * Register a SERVICE-tier service with the topology using human-readable capabilities

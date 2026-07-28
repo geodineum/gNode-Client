@@ -41,6 +41,15 @@ AUDIT_*.md
 # DIRECTORY to find a re-included file.
 !/tests/receipt-vectors.json
 !/tests/Unit/ReceiptVectorsTest.php
+# …and the capability-routing selection test, on the same reasoning: it decides
+# WHICH MACHINE work goes to, so a regression here does not fail loudly, it
+# quietly sends work somewhere it was not meant to go.
+#
+# NOTE: this is now the second exception to a blanket "/tests/ is ignored" that
+# predates both. Adding them one at a time is not a policy — the repo tracks no
+# tests at all, which is worth an explicit decision rather than a growing list
+# of negations.
+!/tests/Unit/CapRouteTest.php
 
 # Credentials and secrets
 /.gnode/
