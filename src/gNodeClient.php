@@ -4763,7 +4763,7 @@ class gNodeClient implements gNodeClientInterface
         // Note: 'findServices' itself has no
         // handler descriptor in the daemon catalog. The canonical capability-
         // vector discovery command is 'geometric_discover' (geometric.rs,
-        // Lane::Fast — takes `capabilities: {dim: value}` and returns matching
+        // Lane::Concurrent — takes `capabilities: {dim: value}` and returns matching
         // services). The wrapper translates its legacy `requirements` shape
         // to the new `capabilities` field so callers don't need updating.
         $response = $this->sendCommand('geometric_discover', [
@@ -4798,7 +4798,7 @@ class gNodeClient implements gNodeClientInterface
     {
         // Note: 'getServiceDetails' itself has
         // no handler descriptor in the daemon catalog. The canonical command
-        // is 'service_describe' (introspection.rs, Lane::Fast — returns the
+        // is 'service_describe' (introspection.rs, Lane::Concurrent — returns the
         // exact shape this wrapper expects: service_id + capabilities +
         // metadata + health + tier). The wrapper's external API is
         // unchanged; only the wire command name shifts.
