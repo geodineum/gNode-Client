@@ -2109,12 +2109,18 @@ class gNodeClient implements gNodeClientInterface
      */
     protected function publishInvalidationEvent(string $event, string $reason, array $extra = []): void
     {
-        $this->storage->publish("{$this->siteId}:events:invalidate", json_encode(array_merge([
-            'event' => $event,
-            'reason' => $reason,
-            'timestamp' => microtime(true),
-            'rebuild_priority' => 'high'
-        ], $extra)));
+        // Best-effort: the event accelerates a rebuild the daemon would do
+        // anyway on TTL; a publish failure must never fail the caller's save.
+        try {
+            $this->storage->publish("{$this->siteId}:events:invalidate", json_encode(array_merge([
+                'event' => $event,
+                'reason' => $reason,
+                'timestamp' => microtime(true),
+                'rebuild_priority' => 'high'
+            ], $extra)));
+        } catch (\Throwable $e) {
+            error_log("[gNodeClient] invalidation event '{$event}' dropped: {$e->getMessage()}");
+        }
     }
 
     //=========================================================================
