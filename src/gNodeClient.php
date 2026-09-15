@@ -1774,31 +1774,30 @@ class gNodeClient implements gNodeClientInterface
     }
 
     /**
-     * Discover services based on geometric requirements
+     * Rank services by distance over the capability axes you name
      *
-     * @param array $capabilities Required capabilities
+     * Axes you leave out do not count. Axis names and value codes come from the
+     * published schema (getCapabilityDimensions / GNODE_SCHEMA_GET).
+     *
+     * @param array $capabilities Axis name => value in [0, 1]
      * @param int $limit Maximum number of services to return
-     * @param int $dimensions Number of dimensions to consider
-     * @param int $distance Maximum distance threshold
-     * @return array Array of matching services
+     * @param float $threshold Drop services farther than this distance; 0 keeps all
+     * @return array List of ['service_id' => string, 'distance' => float], nearest first
      */
-    public function geometricDiscover(array $capabilities, int $limit = 10, int $dimensions = 0, int $distance = 0): array
+    public function geometricDiscover(array $capabilities, int $limit = 10, float $threshold = 0.0): array
     {
-        if (!isset($capabilities[0]) && count($capabilities) > 0) {
-            $capabilityNames = array_keys($capabilities);
-        } else {
-            $capabilityNames = $capabilities;
+        if (empty($capabilities) || isset($capabilities[0])) {
+            throw new \InvalidArgumentException('geometricDiscover ranks by value: pass [axis => value]');
         }
 
         $response = $this->sendCommand('geometric_discover', [
-            'capabilities' => $capabilityNames,
+            'capabilities' => $capabilities,
             'limit' => $limit,
-            'dimensions' => $dimensions,
-            'distance' => $distance
+            'threshold' => $threshold
         ]);
 
         if ($response && isset($response['status']) && $response['status'] === 'ok') {
-            return $response['result']['services'] ?? [];
+            return $response['result']['results'] ?? [];
         }
 
         if ($response && isset($response['status']) && $response['status'] === 'error') {
@@ -1834,7 +1833,11 @@ class gNodeClient implements gNodeClientInterface
             'requirements' => $requirements
         ]);
 
-        return $result ?? [];
+        // The daemon answers {services, count}; the local fallback answers a bare list.
+        if (isset($result['services']) && is_array($result['services'])) {
+            return $result['services'];
+        }
+        return is_array($result) ? $result : [];
     }
 
     /**
@@ -3496,13 +3499,6 @@ class gNodeClient implements gNodeClientInterface
             case 'geometric_store_topology':
                 if (!isset($parameters['data']) && !empty($parameters)) {
                     return ['data' => $parameters];
-                }
-                break;
-
-            case 'geometric_discover':
-                if (isset($parameters['capabilities']) && is_array($parameters['capabilities']) &&
-                    !isset($parameters['capabilities'][0]) && count($parameters['capabilities']) > 0) {
-                    $parameters['capabilities'] = array_keys($parameters['capabilities']);
                 }
                 break;
         }
@@ -7944,7 +7940,7 @@ class gNodeClient implements gNodeClientInterface
      *
      * @example
      * $similarity = $gNode->customTopologySimilarity('analytics:pages', 'page_home', 'page_about');
-     * // Returns: ['distance' => 0.234, 'similarity' => 0.810, 'entity1' => [...], 'entity2' => [...]]
+     * // result: ['entity_id_1' => 'page_home', 'entity_id_2' => 'page_about', 'distance' => 0.234, 'similarity' => 0.810, ...]
      */
     public function customTopologySimilarity(string $topologyKey, string $entityId1, string $entityId2): ?array
     {

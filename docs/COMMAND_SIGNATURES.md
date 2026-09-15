@@ -92,9 +92,10 @@ constructs it (all in `src/gNodeClient.php`). Parameter and return semantics:
 | Command (wire) | Client method | Source |
 |---|---|---|
 | `geometric_store_topology` | `geometricStoreTopology(array $topology, int $dimensions=8): bool` | `:1717` |
-| `geometric_discover` | `geometricDiscover(array $capabilities, int $limit=10, ...): array`; also `findServices(array $requirements): array` | `:1743`, `:4383` |
-| `geometric_dimensions` | `getCapabilityDimensions(): array` | `:1803` |
-| `geometric_distance` | `geometricDistance(array $point1, array $point2): array` | `:4468` |
+| `geometric_discover` | `geometricDiscover(array $capabilities, int $limit=10, float $threshold=0.0): array` (axis => value; list of `{service_id, distance}`); also `findServices(array $requirements): array` | `:1787`, `:4763` |
+| `geometric_discover_range` | `discoverRange(array $criteria): array` (service ids) | `:1816` |
+| `geometric_dimensions` | `getCapabilityDimensions(): array` | `:1848` |
+| `geometric_distance` | `geometricDistance(array $point1, array $point2): array` | `:4848` |
 | `geometric_load_sequence` | `getLoadSequence(string $group='default'): array` | `:4450` |
 | `registerService` | `registerService(string $id, array $capabilities, array $metadata=[]): bool` | `:4282` |
 | `deregisterService` | `deregisterService(string $serviceId): bool` | `:4354` |
@@ -107,10 +108,10 @@ constructs it (all in `src/gNodeClient.php`). Parameter and return semantics:
 | `content_store` | `contentStore(string $key, string $content, ...): array` | `:5189` |
 | `content_retrieve` | `contentRetrieve(string $key): array` | `:5230` |
 | `asset_bundle` | `assetBundle(string $bundleId, array $assets, ...): array` | `:5262` |
-| `custom_topology_discover` | `discoverCustomPrecise(string $topologyKey, array $requirements, ...): ?array` | `:7585` |
-| `custom_topology_distance` | `customTopologyDistance(string $topologyKey, array $point1, array $point2): ?array` | `:7608` |
-| `custom_topology_knn` | `customTopologyKnn(string $topologyKey, array $queryPoint, int $k=5): ?array` | `:7631` |
-| `custom_topology_similarity` | `customTopologySimilarity(...)` | `:7655` |
+| `custom_topology_discover` | `discoverCustomPrecise(string $topologyKey, array $requirements, ...): ?array` | `:7875` |
+| `custom_topology_distance` | `customTopologyDistance(string $topologyKey, array $point1, array $point2): ?array` | `:7898` |
+| `custom_topology_knn` | `customTopologyKnn(string $topologyKey, array $queryPoint, int $k=5): ?array` | `:7921` |
+| `custom_topology_similarity` | `customTopologySimilarity(string $topologyKey, string $entityId1, string $entityId2): ?array` | `:7945` |
 
 `executeCommand(string $command, array $parameters=[]): ?array` (`:3267`) is the public
 generic passthrough for any command name.

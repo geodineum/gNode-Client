@@ -99,10 +99,10 @@ echo "4. Direct client access for advanced operations:\n\n";
 
 $client = $gNode->getClient();
 
-// Geometric discovery example
+// Geometric discovery example: axis => value code from the published schema
 $capabilities = [
-    'template_rendering' => 1.0,
-    'html' => 1.0,
+    'domain_primary' => 0.50,   // template
+    'service_scope' => 0.60,    // internal_api
 ];
 
 $discoveredServices = $client->geometricDiscover($capabilities);

@@ -127,8 +127,8 @@ echo "=== Benchmark 3: Service Discovery Cache Performance ===\n\n";
 $gNode->clearCache();
 
 $capabilities = [
-    'template_rendering' => 1.0,
-    'html' => 1.0,
+    'domain_primary' => 0.50,   // template
+    'service_scope' => 0.60,    // internal_api
 ];
 
 $lookupTimes = [];

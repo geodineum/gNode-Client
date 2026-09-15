@@ -258,15 +258,14 @@ interface gNodeClientInterface
     public function geometricStoreTopology(array $topology, int $dimensions = 8): bool;
 
     /**
-     * Discover services based on geometric requirements
+     * Rank services by distance over the capability axes you name
      *
-     * @param array $capabilities Required capabilities with minimum values or capability names
+     * @param array $capabilities Axis name => value in [0, 1]; axes left out do not count
      * @param int $limit Maximum number of services to return
-     * @param int $dimensions Number of dimensions to consider
-     * @param int $distance Maximum distance threshold
-     * @return array Array of matching services
+     * @param float $threshold Drop services farther than this distance; 0 keeps all
+     * @return array List of ['service_id' => string, 'distance' => float], nearest first
      */
-    public function geometricDiscover(array $capabilities, int $limit = 10, int $dimensions = 0, int $distance = 0): array;
+    public function geometricDiscover(array $capabilities, int $limit = 10, float $threshold = 0.0): array;
 
     /**
      * Discover services using range query operators

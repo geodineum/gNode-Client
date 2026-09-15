@@ -173,7 +173,7 @@ class ServiceProxy
         $this->stats['discoveries']++;
 
         try {
-            $result = $this->client->geometricDiscover($capabilities, $this->loadAware);
+            $result = $this->client->geometricDiscover($capabilities, 1)[0] ?? null;
 
             if (isset($result['service_id'])) {
                 // Cache discovered service
