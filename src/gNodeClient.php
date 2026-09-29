@@ -588,7 +588,9 @@ class gNodeClient implements gNodeClientInterface
     /**
      * Get the health stream name for reporting metrics to the daemon
      *
-     * Pattern: {site_id}:gnode:health:{environment}
+     * Pattern: {site_id}:gnode:health — no environment suffix. The Lua
+     * provisioning creates and reports this key, and the daemon subscribes to
+     * what discovery reports; a suffixed variant names a stream nobody reads.
      *
      * @return string Health stream key
      * @api
@@ -596,10 +598,9 @@ class gNodeClient implements gNodeClientInterface
     public function getHealthStream(): string
     {
         return sprintf(
-            '{%s}:%s:health:%s',
+            '{%s}:%s:health',
             $this->siteId,
-            $this->config['stream_prefix'] ?? 'gnode',
-            $this->environment
+            $this->config['stream_prefix'] ?? 'gnode'
         );
     }
 
@@ -1891,42 +1892,37 @@ class gNodeClient implements gNodeClientInterface
      */
     protected function getDimensionIndex(string $name): int
     {
-        // Fallback only — see below. Frozen at the v2.0 23-dimension layout; the
-        // daemon's service tier is now 30 and six of these indices have moved.
+        // Fallback only — see below. Generated from the daemon's
+        // service_schema.yaml v4.0: 0-15 declared and hashed, 16-18 derived,
+        // 19-22 storage. Ask the daemon first; this exists for a client that
+        // starts before the master does.
         $static = [
-            // Layer 1: Interface Identity (0-3)
+            // declared, hashed
             'protocol' => 0,
-            'native_format' => 1,
-            'api_version' => 2,
-            'contract_stability' => 3,
-            // Layer 2: Access Control (4-6)
-            'clearance_required' => 4,
-            'auth_method' => 5,
-            'data_sensitivity' => 6,
-            // Layer 3: Service Scope (7)
-            'service_scope' => 7,
-            // Layer 4: Functional Domain (8-10)
-            'domain_primary' => 8,
-            'domain_secondary' => 9,
-            'specialization' => 10,
-            // Layer 5: Performance Profile (11-13)
-            'throughput_tier' => 11,
-            'latency_class' => 12,
-            'reliability_tier' => 13,
-            // Layer 6: Workflow Context (14-15)
-            'pipeline_stage' => 14,
-            'execution_priority' => 15,
-            // Layer 7: Runtime State (16)
+            'api_version' => 1,
+            'contract_stability' => 2,
+            'clearance_required' => 3,
+            'auth_method' => 4,
+            'data_sensitivity' => 5,
+            'service_scope' => 6,
+            'domain_primary' => 7,
+            'domain_secondary' => 8,
+            'specialization' => 9,
+            'throughput_tier' => 10,
+            'latency_class' => 11,
+            'reliability_tier' => 12,
+            'pipeline_stage' => 13,
+            'execution_priority' => 14,
+            'environment' => 15,
+            // derived
             'current_load' => 16,
-            // Layer 8: Classification (17-18)
-            'service_tier' => 17,
-            'environment' => 18,
-            // Layer 9: Visual Topology (19-21)
-            'user_x' => 19,
-            'user_y' => 20,
-            'user_z' => 21,
-            // Layer 10: Temporal (22)
-            'registration_order' => 22,
+            'health_status' => 17,
+            'lifecycle_state' => 18,
+            // storage
+            'native_format' => 19,
+            'implementation_language' => 20,
+            'data_persistence' => 21,
+            'service_tier' => 22,
         ];
 
         // The daemon first, the table second — and in that order deliberately.
@@ -6500,35 +6496,31 @@ class gNodeClient implements gNodeClientInterface
     /**
      * The BUILT-IN capability vocabulary — a fallback, not the truth.
      *
-     * This used to describe itself as "the canonical 23-dimension semantic
-     * topology schema". It is not canonical and has not been for some time. The
-     * daemon's service tier carries 30 dimensions, and this copy disagrees with
-     * it in ways that matter:
-     *
-     *   - seven dimensions are missing entirely (health_status, lifecycle_state,
-     *     implementation_language, network_zone, data_persistence,
-     *     update_channel, deployment_model)
-     *   - six indices are wrong: service_tier is 17 here and 19 there,
-     *     environment 18 vs 20, user_x/y/z 19/20/21 vs 25/26/27, and
-     *     registration_order 22 vs 29
+     * Generated from the daemon's service_schema.yaml v4.0 (23 dimensions:
+     * 16 declared and hashed, 3 derived, 4 storage). It used to be frozen at
+     * a 23-dimension layout that disagreed with the daemon in six indices,
+     * which is how a range query on one axis came to constrain another.
      *
      * Prefer getPublishedCapabilitySchema(), which asks the daemon. This exists
      * for the case where nothing is published yet — an old daemon, or a client
-     * that starts before the master does — and for its value vocabulary, which
-     * is still correct for the dimensions it does know about.
+     * that starts before the master does.
+     *
+     * A derived axis (writer: sampler) is written by the daemon's measurement,
+     * never by a registering provider: code 0.00 on one means UNKNOWN.
      *
      * @return array Dimension definitions with value mappings
      */
     public static function getBuiltinCapabilitySchema(): array
     {
         return [
-            'schema_version' => '2.0',
+            'schema_version' => '4.0',
             'total_dimensions' => 23,
+            'discovery_dimensions' => 19,
+            'hashed_dimensions' => 16,
             'dimensions' => [
-                // Layer 1: Interface Identity (0-3)
+                // declared, hashed
                 'protocol' => [
                     'index' => 0,
-                    'layer' => 'interface_identity',
                     'query_type' => 'equality',
                     'values' => [
                         'undefined' => 0.00,
@@ -6543,28 +6535,11 @@ class gNodeClient implements gNodeClientInterface
                         'custom_tcp' => 0.90,
                     ],
                 ],
-                'native_format' => [
-                    'index' => 1,
-                    'layer' => 'interface_identity',
-                    'query_type' => 'informational',
-                    'values' => [
-                        'undefined' => 0.00,
-                        'plaintext' => 0.10,
-                        'json' => 0.20,
-                        'xml' => 0.30,
-                        'yaml' => 0.40,
-                        'msgpack' => 0.50,
-                        'protobuf' => 0.60,
-                        'cbor' => 0.70,
-                        'resp3' => 0.80,
-                        'custom_binary' => 0.90,
-                    ],
-                ],
                 'api_version' => [
-                    'index' => 2,
-                    'layer' => 'interface_identity',
+                    'index' => 1,
                     'query_type' => 'equality',
                     'values' => [
+                        'undefined' => 0.00,
                         'v1' => 0.10,
                         'v2' => 0.20,
                         'v3' => 0.30,
@@ -6573,9 +6548,8 @@ class gNodeClient implements gNodeClientInterface
                     ],
                 ],
                 'contract_stability' => [
-                    'index' => 3,
-                    'layer' => 'interface_identity',
-                    'query_type' => 'minimum',
+                    'index' => 2,
+                    'query_type' => 'range',
                     'values' => [
                         'experimental' => 0.00,
                         'alpha' => 0.25,
@@ -6584,11 +6558,9 @@ class gNodeClient implements gNodeClientInterface
                         'frozen' => 1.00,
                     ],
                 ],
-                // Layer 2: Access Control (4-6)
                 'clearance_required' => [
-                    'index' => 4,
-                    'layer' => 'access_control',
-                    'query_type' => 'maximum',
+                    'index' => 3,
+                    'query_type' => 'range',
                     'values' => [
                         'public' => 0.00,
                         'authenticated' => 0.20,
@@ -6599,8 +6571,7 @@ class gNodeClient implements gNodeClientInterface
                     ],
                 ],
                 'auth_method' => [
-                    'index' => 5,
-                    'layer' => 'access_control',
+                    'index' => 4,
                     'query_type' => 'equality',
                     'values' => [
                         'none' => 0.00,
@@ -6612,9 +6583,8 @@ class gNodeClient implements gNodeClientInterface
                     ],
                 ],
                 'data_sensitivity' => [
-                    'index' => 6,
-                    'layer' => 'access_control',
-                    'query_type' => 'informational',
+                    'index' => 5,
+                    'query_type' => 'range',
                     'values' => [
                         'public_data' => 0.00,
                         'internal' => 0.25,
@@ -6623,11 +6593,9 @@ class gNodeClient implements gNodeClientInterface
                         'regulated' => 1.00,
                     ],
                 ],
-                // Layer 3: Service Scope (7)
                 'service_scope' => [
-                    'index' => 7,
-                    'layer' => 'service_scope',
-                    'query_type' => 'range',
+                    'index' => 6,
+                    'query_type' => 'equality',
                     'values' => [
                         'infrastructure' => 0.00,
                         'daemon' => 0.15,
@@ -6639,12 +6607,11 @@ class gNodeClient implements gNodeClientInterface
                         'edge' => 1.00,
                     ],
                 ],
-                // Layer 4: Functional Domain (8-10)
                 'domain_primary' => [
-                    'index' => 8,
-                    'layer' => 'functional_domain',
-                    'query_type' => 'equality',
+                    'index' => 7,
+                    'query_type' => 'proximity',
                     'values' => [
+                        'undefined' => 0.00,
                         'platform' => 0.05,
                         'identity' => 0.10,
                         'configuration' => 0.15,
@@ -6667,14 +6634,33 @@ class gNodeClient implements gNodeClientInterface
                     ],
                 ],
                 'domain_secondary' => [
-                    'index' => 9,
-                    'layer' => 'functional_domain',
-                    'query_type' => 'equality',
-                    'values' => 'same as domain_primary',
+                    'index' => 8,
+                    'query_type' => 'proximity',
+                    'values' => [
+                        'undefined' => 0.00,
+                        'platform' => 0.05,
+                        'identity' => 0.10,
+                        'configuration' => 0.15,
+                        'storage' => 0.20,
+                        'cache' => 0.25,
+                        'compute' => 0.30,
+                        'transform' => 0.35,
+                        'messaging' => 0.40,
+                        'workflow' => 0.45,
+                        'template' => 0.50,
+                        'content' => 0.55,
+                        'gateway' => 0.60,
+                        'integration' => 0.65,
+                        'analytics' => 0.70,
+                        'logging' => 0.75,
+                        'ml_inference' => 0.80,
+                        'search' => 0.85,
+                        'notification' => 0.90,
+                        'presentation' => 0.95,
+                    ],
                 ],
                 'specialization' => [
-                    'index' => 10,
-                    'layer' => 'functional_domain',
+                    'index' => 9,
                     'query_type' => 'range',
                     'values' => [
                         'platform' => 0.00,
@@ -6684,11 +6670,9 @@ class gNodeClient implements gNodeClientInterface
                         'single_purpose' => 1.00,
                     ],
                 ],
-                // Layer 5: Performance Profile (11-13)
                 'throughput_tier' => [
-                    'index' => 11,
-                    'layer' => 'performance',
-                    'query_type' => 'minimum',
+                    'index' => 10,
+                    'query_type' => 'range',
                     'values' => [
                         'minimal' => 0.00,
                         'standard' => 0.25,
@@ -6698,9 +6682,8 @@ class gNodeClient implements gNodeClientInterface
                     ],
                 ],
                 'latency_class' => [
-                    'index' => 12,
-                    'layer' => 'performance',
-                    'query_type' => 'maximum',
+                    'index' => 11,
+                    'query_type' => 'range',
                     'values' => [
                         'realtime' => 0.00,
                         'interactive' => 0.25,
@@ -6710,9 +6693,8 @@ class gNodeClient implements gNodeClientInterface
                     ],
                 ],
                 'reliability_tier' => [
-                    'index' => 13,
-                    'layer' => 'performance',
-                    'query_type' => 'minimum',
+                    'index' => 12,
+                    'query_type' => 'range',
                     'values' => [
                         'best_effort' => 0.00,
                         'standard' => 0.25,
@@ -6721,11 +6703,9 @@ class gNodeClient implements gNodeClientInterface
                         'ultra' => 1.00,
                     ],
                 ],
-                // Layer 6: Workflow Context (14-15)
                 'pipeline_stage' => [
-                    'index' => 14,
-                    'layer' => 'workflow',
-                    'query_type' => 'range',
+                    'index' => 13,
+                    'query_type' => 'equality',
                     'values' => [
                         'source' => 0.00,
                         'ingest' => 0.20,
@@ -6736,9 +6716,8 @@ class gNodeClient implements gNodeClientInterface
                     ],
                 ],
                 'execution_priority' => [
-                    'index' => 15,
-                    'layer' => 'workflow',
-                    'query_type' => 'minimum',
+                    'index' => 14,
+                    'query_type' => 'range',
                     'values' => [
                         'background' => 0.00,
                         'low' => 0.25,
@@ -6747,75 +6726,105 @@ class gNodeClient implements gNodeClientInterface
                         'critical' => 1.00,
                     ],
                 ],
-                // Layer 7: Runtime State (16)
+                'environment' => [
+                    'index' => 15,
+                    'query_type' => 'equality',
+                    'values' => [
+                        'global' => 0.00,
+                        'testing' => 0.25,
+                        'staging' => 0.50,
+                        'acceptance' => 0.75,
+                        'production' => 1.00,
+                    ],
+                ],
+                // derived
                 'current_load' => [
                     'index' => 16,
-                    'layer' => 'runtime',
-                    'query_type' => 'maximum',
+                    'query_type' => 'range',
+                    'writer' => 'sampler',
                     'values' => [
-                        'idle' => 0.00,
-                        'light' => 0.25,
-                        'moderate' => 0.50,
-                        'heavy' => 0.75,
+                        'unknown' => 0.00,
+                        'idle' => 0.20,
+                        'light' => 0.40,
+                        'moderate' => 0.60,
+                        'heavy' => 0.80,
                         'saturated' => 1.00,
                     ],
                 ],
-                // Layer 8: Classification (17-18)
-                'service_tier' => [
+                'health_status' => [
                     'index' => 17,
-                    'layer' => 'classification',
-                    'query_type' => 'range',
-                    'values' => [
-                        'TOOL' => 0.10,             // Global utilities, managers
-                        'SERVICE' => 0.30,           // Business logic, WordPress sites
-                        'PIPELINE' => 0.50,          // Discovery, registry services
-                        'INFRASTRUCTURE' => 0.70,    // Data pipelines, ETL
-                        'ORCHESTRATOR' => 0.90,      // gNode daemons, orchestrators
-                        // Backward-compatible aliases
-                        'FORUM' => 0.50,
-                        'AQUEDUCT' => 0.70,
-                        'ROME' => 0.90,
-                    ],
-                ],
-                'environment' => [
-                    'index' => 18,
-                    'layer' => 'classification',
                     'query_type' => 'equality',
+                    'writer' => 'sampler',
                     'values' => [
-                        'global' => 0.00,      // Tools, infrastructure (no environment)
-                        'testing' => 0.25,     // Development, feature branches
-                        'staging' => 0.50,     // Pre-production validation
-                        'acceptance' => 0.75,  // UAT, client approval
-                        'production' => 1.00,  // Live traffic
+                        'unknown' => 0.00,
+                        'dead' => 0.33,
+                        'degraded' => 0.67,
+                        'healthy' => 1.00,
                     ],
                 ],
-
-                // Layer 9: Visual Topology (19-21) - User-set visual positioning
-                'user_x' => [
+                'lifecycle_state' => [
+                    'index' => 18,
+                    'query_type' => 'equality',
+                    'writer' => 'daemon',
+                    'values' => [
+                        'registering' => 0.00,
+                        'active' => 0.25,
+                        'draining' => 0.50,
+                        'stopped' => 0.75,
+                        'failed' => 1.00,
+                    ],
+                ],
+                // storage
+                'native_format' => [
                     'index' => 19,
-                    'layer' => 'visual_topology',
-                    'query_type' => 'range',
-                    'values' => ['left' => 0.00, 'center' => 0.50, 'right' => 1.00],
+                    'query_type' => 'informational',
+                    'values' => [
+                        'undefined' => 0.00,
+                        'plaintext' => 0.10,
+                        'json' => 0.20,
+                        'xml' => 0.30,
+                        'yaml' => 0.40,
+                        'msgpack' => 0.50,
+                        'protobuf' => 0.60,
+                        'cbor' => 0.70,
+                        'resp3' => 0.80,
+                        'custom_binary' => 0.90,
+                    ],
                 ],
-                'user_y' => [
+                'implementation_language' => [
                     'index' => 20,
-                    'layer' => 'visual_topology',
-                    'query_type' => 'range',
-                    'values' => ['bottom' => 0.00, 'middle' => 0.50, 'top' => 1.00],
+                    'query_type' => 'informational',
+                    'values' => [
+                        'undefined' => 0.00,
+                        'rust' => 0.15,
+                        'php' => 0.30,
+                        'lua' => 0.45,
+                        'python' => 0.55,
+                        'go' => 0.65,
+                        'javascript' => 0.75,
+                        'bash' => 0.90,
+                    ],
                 ],
-                'user_z' => [
+                'data_persistence' => [
                     'index' => 21,
-                    'layer' => 'visual_topology',
-                    'query_type' => 'range',
-                    'values' => ['back' => 0.00, 'center' => 0.50, 'front' => 1.00],
+                    'query_type' => 'informational',
+                    'values' => [
+                        'stateless' => 0.00,
+                        'ephemeral' => 0.33,
+                        'persistent' => 0.67,
+                        'replicated' => 1.00,
+                    ],
                 ],
-
-                // Layer 10: Temporal (22) - Auto-computed registration order
-                'registration_order' => [
+                'service_tier' => [
                     'index' => 22,
-                    'layer' => 'temporal',
-                    'query_type' => 'range',
-                    'values' => ['first' => 0.00, 'early' => 0.25, 'middle' => 0.50, 'late' => 0.75, 'recent' => 1.00],
+                    'query_type' => 'informational',
+                    'values' => [
+                        'tool' => 0.10,
+                        'service' => 0.30,
+                        'pipeline' => 0.50,
+                        'infrastructure' => 0.70,
+                        'orchestrator' => 0.90,
+                    ],
                 ],
             ],
         ];

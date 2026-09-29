@@ -12,9 +12,19 @@ use gCore\gNode\Exception\StorageException;
  * This class writes health metrics directly to the dedicated health stream
  * using compressed field format for optimal bandwidth efficiency.
  *
- * Stream: {site_id}:gnode:health:{node_id}
- * Consumer Group: gnode-daemon (daemon reads from this stream)
+ * Stream: {site_id}:gnode:health — the key gnode_site.lua provisions and
+ * reports through stream discovery, which is what the daemon subscribes to.
+ * No environment or node suffix: a health record is about one site's service,
+ * and that service's entity carries its own environment on the `environment`
+ * axis.
+ * Consumer Groups: gnode-workers (the dynamic discovery path) and gnode-daemon
+ * (the static fallback). A message is acknowledged by whichever group read it.
  * Throughput: Supports >10,000 msg/sec
+ *
+ * A self-reported load is a SECONDARY signal. The daemon derives load itself,
+ * from reply latency against each provider's own rolling baseline, and writes
+ * it to the `current_load` axis; publish here when this side knows something
+ * the daemon cannot see.
  *
  * Usage:
  * ```php
@@ -77,16 +87,14 @@ class HealthStreamWriter
         $this->environment = $config['environment'] ?? 'production';  // NEW: DTAP environment
         $this->debug = $config['debug'] ?? false;
 
-        // Health stream naming convention: {site_id}:gnode:health:{environment}
-        // Using braces for proper hash distribution in ValKey
-        // Pattern matches daemon expectation: {site_id}:gnode:health:{environment}
+        // Health stream naming convention: {site_id}:gnode:health
+        // Braces give the site's keys one hash slot. No suffix: this is the key
+        // the Lua provisioning creates and reports, and the only one publishers
+        // and the daemon ever meet on. The suffixed shapes this used to build
+        // ({environment} here, {node_id} before that) named streams nothing
+        // wrote to while real records piled up in the unsuffixed one.
         $streamPrefix = $config['stream_prefix'] ?? 'gnode';
-        $this->healthStream = sprintf(
-            '{%s}:%s:health:%s',
-            $this->siteId,
-            $streamPrefix,
-            $this->environment  // FIX: Was nodeId - now uses environment for DTAP isolation
-        );
+        $this->healthStream = sprintf('{%s}:%s:health', $this->siteId, $streamPrefix);
 
         $this->debug("HealthStreamWriter initialized for stream: {$this->healthStream}");
     }

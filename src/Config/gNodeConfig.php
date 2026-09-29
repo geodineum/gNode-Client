@@ -171,7 +171,8 @@ class gNodeConfig
     /**
      * Get stream key for health stream
      *
-     * Pattern: {site_id}:gnode:health:{environment}
+     * Pattern: {site_id}:gnode:health — no environment suffix. That is the key
+     * the Lua provisioning creates and reports, and the one the daemon reads.
      *
      * @return string Stream key
      */
@@ -179,9 +180,8 @@ class gNodeConfig
     {
         $siteId = $this->config['site_id'];
         $prefix = $this->config['stream_prefix'];
-        $env = $this->config['environment'];
 
-        return "{{$siteId}}:{$prefix}:health:{$env}";
+        return "{{$siteId}}:{$prefix}:health";
     }
 
     /**
