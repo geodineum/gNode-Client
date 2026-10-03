@@ -40,6 +40,34 @@ final class MoneyClient
     }
 
     /**
+     * Canonicalise one amount at its currency's precision.
+     *
+     * The command that keeps the currency-width table in one place: a caller
+     * never needs to know that EUR has two decimals and JPY none, and so never
+     * hardcodes a division by 100.
+     *
+     * @param string   $currency 3-letter uppercase ISO 4217 code
+     * @param string   $value    Exact decimal string; pass null to use $minor
+     * @param int|null $minor    Integer minor units; mutually exclusive with $value
+     * @return array<string,mixed> currency, exponent, value, minor
+     * @throws MoneyException
+     * @api
+     */
+    public function parse(string $currency, ?string $value = null, ?int $minor = null): array
+    {
+        if (($value === null) === ($minor === null)) {
+            throw new MoneyException('money_parse needs exactly one of value or minor');
+        }
+        $params = ['currency' => $currency];
+        if ($value !== null) {
+            $params['value'] = $value;
+        } else {
+            $params['minor'] = $minor;
+        }
+        return $this->call('money_parse', $params, ['value', 'minor', 'exponent']);
+    }
+
+    /**
      * Reconcile invoice lines exactly.
      *
      *   totalAmount = unitPrice x quantity - discountAmount

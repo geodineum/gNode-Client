@@ -188,6 +188,7 @@
 ### `MoneyClient`
 <sub>`src/Money/MoneyClient.php`</sub>
 
+- `parse(string $currency, ?string $value = null, ?int $minor = null): array` — Canonicalise one amount at its currency's precision
 - `lines(string $currency, array $lines, array $options = []): array` — Reconcile invoice lines exactly
 - `allocate(string $currency, string $amount, array $weights): array` — Split an amount by integer weights so the parts sum to it exactly
 - `sum(string $currency, array $values, ?string $expected = null): array` — Sum exact decimal strings, optionally asserting the total

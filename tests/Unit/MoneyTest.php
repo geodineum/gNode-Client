@@ -181,6 +181,45 @@ final class MoneyTest extends TestCase
         $this->assertSame('10.00', $seen['amount']);
     }
 
+    public function testParseNeedsExactlyOneInputForm(): void
+    {
+        $client = $this->createMock(gNodeClient::class);
+        $client->method('isUsingFallback')->willReturn(false);
+        $client->expects($this->never())->method('executeCommand');
+        $money = new MoneyClient($client);
+
+        foreach ([[null, null], ['1.00', 100]] as [$value, $minor]) {
+            try {
+                $money->parse('EUR', $value, $minor);
+                $this->fail('accepted both/neither');
+            } catch (MoneyException $e) {
+                $this->assertStringContainsString('exactly one', $e->getMessage());
+            }
+        }
+    }
+
+    public function testParseSendsOnlyTheFormItWasGiven(): void
+    {
+        $seen = [];
+        $client = $this->createMock(gNodeClient::class);
+        $client->method('isUsingFallback')->willReturn(false);
+        $client->method('executeCommand')->willReturnCallback(
+            function (string $cmd, array $params) use (&$seen) {
+                $seen[] = $params;
+                return ['value' => '19.99', 'minor' => 1999, 'exponent' => 2];
+            }
+        );
+        $money = new MoneyClient($client);
+
+        $money->parse('EUR', '19.99');
+        $this->assertArrayHasKey('value', $seen[0]);
+        $this->assertArrayNotHasKey('minor', $seen[0]);
+
+        $money->parse('EUR', null, 1999);
+        $this->assertSame(1999, $seen[1]['minor']);
+        $this->assertArrayNotHasKey('value', $seen[1]);
+    }
+
     public function testSumMatchesReportsOnlyAnExplicitTrue(): void
     {
         $client = $this->createMock(gNodeClient::class);

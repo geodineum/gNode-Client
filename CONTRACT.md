@@ -40,7 +40,7 @@ functions — a base install never puts a Pro function name on the wire:
 | Prefixes | Extension | feature |
 |---|---|---|
 | `GNODE_DEP_*`, `GNODE_REGISTRY_*`, `GNODE_CROSS_*` | gNode-TOPO | `multi_topology` |
-| `money_lines`, `money_allocate`, `money_sum` (daemon commands, not FCALLs) | gNode-MONEY | `money` |
+| `money_parse`, `money_lines`, `money_allocate`, `money_sum` (daemon commands, not FCALLs) | gNode-MONEY | `money` |
 | `GNODE_FEATURE_*`, `GNODE_EXPERIMENT_*`, `GNODE_SESSION_*`, `GNODE_TRACE_*` | gNode-OBSERVE | `observability` |
 | `GNODE_ENDPOINT_*` | gNode-BROKER | `endpoint_translation` |
 
@@ -99,6 +99,7 @@ duals now delegate to the canonical `endpoint*` methods; their former raw
 | Method | Signature | Source |
 |---|---|---|
 | `gNodeClient::getMoney` | `getMoney(): MoneyClient` — lazily built, shares this client's transport | `src/gNodeClient.php` |
+| `MoneyClient::parse` | `parse(string $currency, ?string $value=null, ?int $minor=null): array` → `money_parse` | `src/Money/MoneyClient.php` |
 | `MoneyClient::lines` | `lines(string $currency, array $lines, array $options=[]): array` → `money_lines` | `src/Money/MoneyClient.php` |
 | `MoneyClient::allocate` | `allocate(string $currency, string $amount, array $weights): array` → `money_allocate` | `src/Money/MoneyClient.php` |
 | `MoneyClient::sum` | `sum(string $currency, array $values, ?string $expected=null): array` → `money_sum` | `src/Money/MoneyClient.php` |
@@ -121,7 +122,8 @@ therefore be a float. Three behaviours are contractual rather than incidental:
 `Money::of` gates the *shape* of a value (one optional sign, digits, at most
 one point, at most six fractional digits, no whitespace) and deliberately does
 **not** know how many decimals a currency has. That table lives once, in the
-daemon.
+daemon, and `parse()` is how a consumer asks it — which is why nothing in this
+library or its consumers divides by 100.
 
 ---
 
