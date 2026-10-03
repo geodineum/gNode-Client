@@ -46,7 +46,7 @@
 - `getCacheStats(): array` — Get cache statistics
 - `invalidateCache(?string $pattern = null): int` — Invalidate cache
 - `geometricStoreTopology(array $topology, int $dimensions = 8): bool` — Store topology information
-- `geometricDiscover(array $capabilities, int $limit = 10, int $dimensions = 0, int $distance = 0): array` — Discover services based on geometric requirements
+- `geometricDiscover(array $capabilities, int $limit = 10, float $threshold = 0.0): array` — Rank services by distance over the capability axes you name
 - `discoverRange(array $criteria): array` — Discover services using range query operators
 - `getCapabilityDimensions(): array` — Get registered capability dimensions
 - `getBundle(bool $decompress = true)` — Get entire site bundle
@@ -131,7 +131,8 @@
 - `executeCommand(string $command, array $parameters = []): ?array` — Execute a generic command
 - `templateFragment(string $templateId, string $content, array $dependencies = [], array $variables = [], ?int $ttl = null): array` — Store a template fragment with dependencies and variables
 - `renderTemplate(string $templateId, array $variables = [], array $config = []): string` — Render a template with variables
-- `getTemplateManager(): \gCore\gNode\Template\TemplateManager` — Get the template manager
+- `getMoney(): \gCore\gNode\Money\MoneyClient` — Get the exact-decimal money client (gNode-MONEY, premium)
+- `getTemplateManager(): \gCore\gNode\Template\TemplateManager`
 
 ## Supporting types
 
@@ -173,9 +174,29 @@
 
 - `publishMetrics(HealthMetrics $metrics): string` — Publish health metrics to the health stream
 
+### `Money`
+<sub>`src/Money/Money.php`</sub>
+
+- `of(string $amount, string $currency): self`
+- `ofMinor(int $minor, int $exponent, string $currency): self` — Integer minor units at a known exponent, for the one case where a
+- `amount(): string` — The exact decimal string, exactly as it will go on the wire
+- `currency(): string` — The 3-letter uppercase ISO 4217 code
+- `equals(self $other): bool` — Same currency and same value, ignoring trailing zeros
+- `isZero(): bool` — True when no digit is non-zero, so "-0.00" is zero
+- `isNegative(): bool` — True for a value below zero; negative zero is not negative
+
+### `MoneyClient`
+<sub>`src/Money/MoneyClient.php`</sub>
+
+- `lines(string $currency, array $lines, array $options = []): array` — Reconcile invoice lines exactly
+- `allocate(string $currency, string $amount, array $weights): array` — Split an amount by integer weights so the parts sum to it exactly
+- `sum(string $currency, array $values, ?string $expected = null): array` — Sum exact decimal strings, optionally asserting the total
+- `sumMatches(string $currency, array $values, string $expected): bool` — Convenience for the common question: do these amounts add up to that one?
+
 ### `ValKeyStorage`
 <sub>`src/Storage/ValKeyStorage.php`</sub>
 
 - `fcall(string $function, array $keys, array $args)`
+- `fcallRo(string $function, array $keys, array $args)`
 - `xAdd(string $key, string $id, array $fields): string` — Add a message to a stream
 

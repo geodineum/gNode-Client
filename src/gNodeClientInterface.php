@@ -547,5 +547,12 @@ interface gNodeClientInterface
      *
      * @return \gCore\gNode\Template\TemplateManager Template manager instance
      */
+    /**
+     * Get the exact-decimal money client (gNode-MONEY, premium)
+     *
+     * @return \gCore\gNode\Money\MoneyClient Money client instance
+     */
+    public function getMoney(): \gCore\gNode\Money\MoneyClient;
+
     public function getTemplateManager(): \gCore\gNode\Template\TemplateManager;
 }

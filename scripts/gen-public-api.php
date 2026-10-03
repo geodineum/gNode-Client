@@ -24,11 +24,12 @@ $SECTIONS = [
     ['title' => 'Supporting types',
      'globs' => ['src/Storage/ValKeyStorage.php', 'src/Health/HealthStreamWriter.php',
                  'src/Health/HealthMetrics.php', 'src/Broadcast/BroadcastReader.php',
-                 'src/Broadcast/BroadcastMessage.php']],
+                 'src/Broadcast/BroadcastMessage.php',
+                 'src/Money/Money.php', 'src/Money/MoneyClient.php']],
 ];
 
 // method-name prefix => Chapter-2 extension that provides it (premium-gated).
-$PREMIUM = ['dep' => 'gNode-TOPO', 'registry' => 'gNode-TOPO'];
+$PREMIUM = ['dep' => 'gNode-TOPO', 'registry' => 'gNode-TOPO', 'money' => 'gNode-MONEY'];
 
 /** Extract [class => [ [sig, summary, isInterface], ... ]] from one PHP file. */
 function extract_public(string $file): array {

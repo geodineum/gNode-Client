@@ -40,6 +40,7 @@ functions — a base install never puts a Pro function name on the wire:
 | Prefixes | Extension | feature |
 |---|---|---|
 | `GNODE_DEP_*`, `GNODE_REGISTRY_*`, `GNODE_CROSS_*` | gNode-TOPO | `multi_topology` |
+| `money_lines`, `money_allocate`, `money_sum` (daemon commands, not FCALLs) | gNode-MONEY | `money` |
 | `GNODE_FEATURE_*`, `GNODE_EXPERIMENT_*`, `GNODE_SESSION_*`, `GNODE_TRACE_*` | gNode-OBSERVE | `observability` |
 | `GNODE_ENDPOINT_*` | gNode-BROKER | `endpoint_translation` |
 
@@ -92,6 +93,35 @@ duals now delegate to the canonical `endpoint*` methods; their former raw
 | Method | Signature | Source |
 |---|---|---|
 | `BroadcastReader::read` | `read(int $count=100, int $blockMs=0, ?string $typeFilter=null): BroadcastMessage[]` | `src/Broadcast/BroadcastReader.php` |
+
+### 1.10 Exact decimal money (→ gNode-MONEY, premium)
+
+| Method | Signature | Source |
+|---|---|---|
+| `gNodeClient::getMoney` | `getMoney(): MoneyClient` — lazily built, shares this client's transport | `src/gNodeClient.php` |
+| `MoneyClient::lines` | `lines(string $currency, array $lines, array $options=[]): array` → `money_lines` | `src/Money/MoneyClient.php` |
+| `MoneyClient::allocate` | `allocate(string $currency, string $amount, array $weights): array` → `money_allocate` | `src/Money/MoneyClient.php` |
+| `MoneyClient::sum` | `sum(string $currency, array $values, ?string $expected=null): array` → `money_sum` | `src/Money/MoneyClient.php` |
+| `MoneyClient::sumMatches` | `sumMatches(string $currency, array $values, string $expected): bool` | `src/Money/MoneyClient.php` |
+| `Money::of` / `Money::ofMinor` | value object: an exact decimal string and its currency, **and no arithmetic** | `src/Money/Money.php` |
+
+Arithmetic is performed by the daemon, in `g_math`'s decimal domain, because
+PHP on this estate has neither `bcmath` nor `gmp` and a local division would
+therefore be a float. Three behaviours are contractual rather than incidental:
+
+- **Money fails closed.** `MoneyClient` refuses to call when the client is on
+  its topology fallback, treats a `null` reply as an error, and treats a reply
+  missing an expected key as an error. No path returns a default, a zero or a
+  partially computed amount.
+- **Replies are the provider's wire shape.** `lines()` output goes to the
+  payment API unchanged; nothing in PHP re-formats an amount.
+- **`Money` has no `add`/`multiply`/`round`.** That absence is the contract,
+  and a test asserts it.
+
+`Money::of` gates the *shape* of a value (one optional sign, digits, at most
+one point, at most six fractional digits, no whitespace) and deliberately does
+**not** know how many decimals a currency has. That table lives once, in the
+daemon.
 
 ---
 

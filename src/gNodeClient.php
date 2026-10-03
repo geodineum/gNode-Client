@@ -219,6 +219,9 @@ class gNodeClient implements gNodeClientInterface
     /** @var \gCore\gNode\Template\TemplateManager|null Template manager */
     protected $templateManager = null;
 
+    /** @var \gCore\gNode\Money\MoneyClient|null Lazily built money client */
+    protected $moneyClient = null;
+
     /** @var \gCore\gNode\Health\HealthStreamWriter|null Health stream writer */
     protected $healthWriter = null;
 
@@ -3759,6 +3762,23 @@ class gNodeClient implements gNodeClientInterface
     public function renderTemplate(string $templateId, array $variables = [], array $config = []): string
     {
         return $this->getTemplateManager()->renderTemplate($templateId, $variables, $config);
+    }
+
+    /**
+     * Get the exact-decimal money client (gNode-MONEY, premium)
+     *
+     * Arithmetic on money is performed by the daemon, not here: PHP has no
+     * bcmath or gmp on this estate, so a local division would be a float.
+     *
+     * @return \gCore\gNode\Money\MoneyClient Money client instance
+     */
+    public function getMoney(): \gCore\gNode\Money\MoneyClient
+    {
+        if ($this->moneyClient === null) {
+            $this->moneyClient = new \gCore\gNode\Money\MoneyClient($this);
+        }
+
+        return $this->moneyClient;
     }
 
     /**
