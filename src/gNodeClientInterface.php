@@ -281,6 +281,16 @@ interface gNodeClientInterface
      */
     public function getCapabilityDimensions(string $shape = 'daemon'): array;
 
+    /**
+     * The constellation grouped by layer: {services, nodes, components, placements}
+     *
+     * @return array Entries decoded by shape (see gNodeClient::decodeEntity)
+     */
+    public function getTopology(): array;
+
+    /** The constellation this client reads and registers in */
+    public function getTopologyNamespace(): string;
+
     //=========================================================================
     // BUNDLE OPERATIONS
     //=========================================================================

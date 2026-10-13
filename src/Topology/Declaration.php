@@ -44,6 +44,14 @@ final class Declaration
     /** The labels that are not labels: an open value declares nothing. */
     private const OPEN = ['public', 'public_data', 'none', 'undefined'];
 
+    /** Shape key → the shape's name. */
+    public const NAMES = ['1' => 'node', '2' => 'component', '3.1' => 'site', '3.2' => 'app', '3.3' => 'daemon', '4.1' => 'component@node', '4.2' => 'service@node'];
+
+    public static function name(?string $key): string
+    {
+        return self::NAMES[(string) $key] ?? (string) $key;
+    }
+
     public static function shapeKey(string $word): string
     {
         $w = strtolower(trim($word));

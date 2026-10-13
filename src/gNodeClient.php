@@ -213,10 +213,6 @@ class gNodeClient implements gNodeClientInterface
      */
     protected const DAEMON_REQUIRED_COMMANDS = [
         'geometric_discover',
-        'geometric_store_topology',
-        'geometric_load_sequence',
-        'geometric_distance',
-        'geometric_dimensions',
         'discover',
         'render_template',
         'render_template_string',
@@ -1810,42 +1806,77 @@ class gNodeClient implements gNodeClientInterface
     }
 
     /**
-     * Get full topology
+     * The constellation as the one topology holds it, grouped by layer.
      *
-     * Reads the derived snapshot hash {topology_namespace}:gnode:topology:services
-     * (field = service_id, value = {point, metadata}) — a read-projection of the
-     * canonical per-service capability entities, maintained on register/deregister.
-     * Default namespace is "geodineum".
+     * One read of `{<c>}:gnode:constellation:entities`; every record decoded by its
+     * shape: `services` (layer 3: sites, apps, daemons), `nodes` (1), `components` (2)
+     * and `placements` (4.x). Each entry carries `shape`, `environment`, `colour`
+     * (axis → words), `metadata`, `point` (the 24 slots as fractions), `load`, `health`
+     * and `registered_at`; placements add `of`, `on` and `weight`. Cached per request.
      *
-     * @return array Full topology, shaped as ['services' => [id => {point, metadata}]]
+     * @return array {services, nodes, components, placements}
      */
     public function getTopology(): array
     {
-        static $cachedTopology = null;
+        static $cached = null;
 
-        if ($cachedTopology !== null) {
-            return $cachedTopology;
+        if ($cached !== null) {
+            return $cached;
         }
 
+        $out = ['services' => [], 'nodes' => [], 'components' => [], 'placements' => []];
         try {
-            $snapshotKey = "{{$this->topologyNamespace}}:gnode:topology:services";
-            $entries = $this->luaHGetAll($snapshotKey);
-            if (!empty($entries)) {
-                $services = [];
-                foreach ($entries as $id => $json) {
-                    $services[$id] = is_array($json)
-                        ? $json
-                        : ($this->safeJsonDecode($json, true) ?? []);
+            $entries = $this->luaHGetAll("{{$this->topologyNamespace}}:gnode:constellation:entities");
+            foreach ($entries as $id => $json) {
+                $rec = is_array($json) ? $json : ($this->safeJsonDecode($json, true) ?? null);
+                if (!is_array($rec)) {
+                    continue;
                 }
-                $cachedTopology = ['services' => $services];
-                return $cachedTopology;
+                $entry = self::decodeEntity((string) $id, $rec);
+                $layer = substr((string) ($rec['sh'] ?? ''), 0, 1);
+                $group = ['1' => 'nodes', '2' => 'components', '3' => 'services', '4' => 'placements'][$layer] ?? null;
+                if ($group !== null) {
+                    $out[$group][(string) $id] = $entry;
+                }
             }
         } catch (\Exception $e) {
-            $this->debug('Failed to read topology snapshot: ' . $e->getMessage());
+            $this->debug('Failed to read the constellation: ' . $e->getMessage());
         }
 
-        $cachedTopology = ['services' => []];
-        return $cachedTopology;
+        $cached = $out;
+        return $cached;
+    }
+
+    /** The stored record of one entity → the shape every reader gets. */
+    public static function decodeEntity(string $id, array $rec): array
+    {
+        $pd = is_array($rec['pd'] ?? null) ? array_values($rec['pd']) : [];
+        $point = array_map('floatval', $pd);
+        $entry = [
+            'id' => $id,
+            'shape' => $rec['sh'] ?? null,
+            'environment' => $rec['env'] ?? null,
+            'colour' => is_array($rec['c'] ?? null) ? $rec['c'] : [],
+            'metadata' => is_array($rec['m'] ?? null) ? $rec['m'] : [],
+            'point' => $point,
+            'load' => $point[16] ?? null,
+            'health' => $point[17] ?? null,
+            'lifecycle' => $point[18] ?? null,
+            'registered_at' => $rec['ra'] ?? null,
+            'registered_order' => $rec['ro'] ?? null,
+        ];
+        foreach (['of' => 'of', 'on' => 'on', 'w' => 'weight', 'hb' => 'heartbeat', 'hbe' => 'heartbeat_env'] as $k => $name) {
+            if (array_key_exists($k, $rec)) {
+                $entry[$name] = $rec[$k];
+            }
+        }
+        return $entry;
+    }
+
+    /** The constellation this client reads and registers in. */
+    public function getTopologyNamespace(): string
+    {
+        return $this->topologyNamespace;
     }
 
     //=========================================================================
@@ -4182,33 +4213,6 @@ class gNodeClient implements gNodeClientInterface
         return [];
     }
 
-    /**
-     * Calculate geometric distance between two points
-     *
-     * @param array $point1 First point
-     * @param array $point2 Second point
-     * @return array Distance information
-     */
-    public function geometricDistance(array $point1, array $point2): array
-    {
-        $response = $this->sendCommand('geometric_distance', [
-            'point1' => $point1,
-            'point2' => $point2
-        ]);
-
-        if ($response && isset($response['status']) && $response['status'] === 'ok') {
-            return $response['result'] ?? [
-                'distance' => 0,
-                'dimensions' => count($point1)
-            ];
-        }
-
-        return [
-            'distance' => 0,
-            'dimensions' => count($point1)
-        ];
-    }
-
     //=========================================================================
     // HEALTH STREAM INTEGRATION
     //=========================================================================
@@ -5842,8 +5846,7 @@ class gNodeClient implements gNodeClientInterface
     //=========================================================================
 
     /**
-     * A service's declaration as the one topology holds it: shape, environment, colour
-     * (axis → words), metadata, and the derived load and health from the header slots.
+     * A service's declaration as the one topology holds it (see decodeEntity()).
      *
      * @param string $serviceId Service identifier
      * @return array|null Declaration, or null when the entity is unknown
@@ -5863,17 +5866,10 @@ class gNodeClient implements gNodeClientInterface
         if (!is_array($rec)) {
             return null;
         }
-        $pd = $rec['pd'] ?? [];
-        return [
-            'service_id' => $serviceId,
-            'shape' => $rec['sh'] ?? null,
-            'environment' => $rec['env'] ?? null,
-            'capabilities' => $rec['c'] ?? [],
-            'metadata' => $rec['m'] ?? [],
-            'load' => isset($pd[16]) ? (float) $pd[16] : (isset($pd['16']) ? (float) $pd['16'] : null),
-            'health' => isset($pd[17]) ? (float) $pd[17] : (isset($pd['17']) ? (float) $pd['17'] : null),
-            'registered_at' => $rec['ro'] ?? null,
-        ];
+        $entry = self::decodeEntity($serviceId, $rec);
+        $entry['service_id'] = $serviceId;
+        $entry['capabilities'] = $entry['colour'];
+        return $entry;
     }
 
     /**

@@ -24,6 +24,13 @@ final class DeclarationTest extends TestCase
         Declaration::shapeKey('pipeline');
     }
 
+    public function testShapeKeysHaveNames(): void
+    {
+        self::assertSame('site', Declaration::name('3.1'));
+        self::assertSame('service@node', Declaration::name('4.2'));
+        self::assertSame('9', Declaration::name('9'));
+    }
+
     public function testLegacyAxesAreRenamedDroppedOrKept(): void
     {
         $b = Declaration::fromLegacy('gflow', [

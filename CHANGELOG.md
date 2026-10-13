@@ -17,11 +17,13 @@ of `registerService` and `geometric_discover` changed with gNode's one topology
 - `sendCommandToCapable()` puts the query in `_rt`; the daemon picks service and placement once per relay. `candidate` and `exclude_self` options are gone.
 - `getPublishedCapabilitySchema($shape)`, `capabilityDimensionCount($shape)` (24), `capabilityDiscoveryWidth($shape)` (provider-written slots), `getCapabilityDimensions($shape)` read the per-shape schema at `{ns}:gnode:constellation:schema:<shape>`.
 - `getServiceCapabilities()` reads the entity record (`HGET …:constellation:entities`) and answers colour words plus derived load and health.
+- `getTopology()` reads `{ns}:gnode:constellation:entities` once and answers `{services, nodes, components, placements}`, each entry decoded by shape (`decodeEntity()`); the `{ns}:gnode:topology:services` projection is no longer read. `getTopologyNamespace()` and `Declaration::name()` added.
 
 ### Removed
 - `geometricStoreTopology()`, `translateCapabilitiesToCoordinates()`, `translateCoordinatesToHuman()`, `getBuiltinCapabilitySchema()`, the built-in dimension tables and `getDimensionIndex()`/`normalizeConstraint()`.
 - `dep*`, `registry*`, `cross*` wrappers and their interface declarations; `GNODE_DEP_*`/`GNODE_REGISTRY_*`/`GNODE_CROSS_*` leave the premium prefix map (retired with the custom-topology engine).
 - `gNodeConfig::getTopologyKey()` (no callers; the one topology key is the daemon's).
+- `geometricDistance()` and the `geometric_distance`, `geometric_store_topology`, `geometric_load_sequence`, `geometric_dimensions` entries of the daemon-required command list: the daemon no longer answers them.
 
 
 ## 0.1.2 — unreleased

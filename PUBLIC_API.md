@@ -49,6 +49,8 @@
 - `query(array $query): array` — One discovery, as Query::build() shapes it
 - `discoverRange(array $criteria, string $layer = '3'): array` — Discover services using range query operators
 - `getCapabilityDimensions(string $shape = 'daemon'): array` — Get registered capability dimensions
+- `getTopology(): array` — The constellation grouped by layer: {services, nodes, components, placements}
+- `getTopologyNamespace(): string` — The constellation this client reads and registers in
 - `getBundle(bool $decompress = true)` — Get entire site bundle
 - `getBundled(string $key, bool $decompress = true)` — Get a specific manifest bundle by key (instant key-based retrieval)
 - `invalidateBundle(): bool` — Invalidate the full site bundle
