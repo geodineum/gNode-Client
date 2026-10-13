@@ -71,20 +71,25 @@ class ClientTest extends TestCase
             ->onlyMethods(['sendCommand'])
             ->getMock();
 
-        $client->method('sendCommand')->willReturn([
-            'status' => 'ok',
-            'result' => true,
-            'timestamp' => microtime(true)
-        ]);
+        $sent = null;
+        $client->method('sendCommand')->willReturnCallback(function (string $command, array $params) use (&$sent) {
+            $sent = [$command, $params];
+            return ['status' => 'ok', 'result' => ['shape' => '3.3'], 'timestamp' => microtime(true)];
+        });
 
         $result = $client->registerService('test-service', [
-            'performance' => 0.9,
-            'reliability' => 0.8
+            'protocol' => 'gnode_stream',
+            'domain_primary' => 'workflow',
         ], [
-            'version' => '1.0'
+            'version' => '1.0',
+            'shape' => 'daemon',
         ]);
 
         $this->assertTrue($result);
+        $this->assertSame('registerService', $sent[0]);
+        $this->assertSame('3.3', $sent[1]['shape']);
+        $this->assertSame(['protocol' => ['gnode_stream'], 'domain' => ['workflow']], $sent[1]['axes']);
+        $this->assertSame(['version' => '1.0'], $sent[1]['metadata']);
     }
 
     /**
@@ -110,7 +115,7 @@ class ClientTest extends TestCase
             'timestamp' => microtime(true)
         ]);
 
-        $result = $client->findServices(['performance' => 0.5]);
+        $result = $client->findServices(['domain' => 'workflow']);
         $this->assertEquals(['service1', 'service2'], $result);
     }
 

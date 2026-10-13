@@ -1,6 +1,6 @@
 # gNode-Client — Integration Contract
 
-PHP client library for the gNode daemon over RESP3/ValKey, with FCALL-only operations, stream-based message queueing, and geometric topology discovery. PSR-4 namespace `gCore\gNode`, Composer-installable.
+PHP client library for the gNode daemon over RESP3/ValKey, with FCALL-only operations, stream-based message queueing, and discovery on the one topology (declarations by name, queries by facet and axis range). PSR-4 namespace `gCore\gNode`, Composer-installable.
 
 ---
 
@@ -39,7 +39,6 @@ functions — a base install never puts a Pro function name on the wire:
 
 | Prefixes | Extension | feature |
 |---|---|---|
-| `GNODE_DEP_*`, `GNODE_REGISTRY_*`, `GNODE_CROSS_*` | gNode-TOPO | `multi_topology` |
 | `money_parse`, `money_lines`, `money_allocate`, `money_sum` (daemon commands, not FCALLs) | gNode-MONEY | `money` |
 | `GNODE_FEATURE_*`, `GNODE_EXPERIMENT_*`, `GNODE_SESSION_*`, `GNODE_TRACE_*` | gNode-OBSERVE | `observability` |
 | `GNODE_ENDPOINT_*` | gNode-BROKER | `endpoint_translation` |
@@ -126,6 +125,24 @@ daemon, and `parse()` is how a consumer asks it — which is why nothing in this
 library or its consumers divides by 100.
 
 ---
+
+### 1.11 One topology (registration + discovery)
+
+One topology per constellation, keyed `{<constellation>}:gnode:constellation` (the
+gNode spec `SPEC-ONE-TOPOLOGY.md` is canonical; this client never writes a coordinate).
+
+| Member | Signature / wire | Notes |
+|---|---|---|
+| `gNodeClient::registerService` | `registerService(string $id, array $capabilities, array $metadata = []): bool` → unified-stream command `registerService` with `{id, shape, environment, axes, metadata, on?, capacity_weight?, heartbeat?, holds?, requires?, peers?, constellation?}` | `$capabilities` is `['shape' => word, 'axes' => [axis => word \| words \| fraction]]` or the legacy flat `axis => word` map (`Topology\Declaration::fromLegacy` renames `domain_primary`/`domain_secondary` → `domain`, `api_version` → `contract_version`, turns `clearance_required`/`data_sensitivity` into `requires` labels, drops axes the schema no longer has and says so in debug). Registration facts may ride in `$metadata` under the keys named above and are lifted out. A **number** for an axis word is refused with `InvalidArgumentException` before any wire I/O. `true` only on a daemon `status=ok` ACK. |
+| `gNodeClient::deregisterService` | `deregisterService(string $id): bool` → `deregisterService {service_id}` | removes the entity and its placements |
+| `gNodeClient::query` | `query(array $q): array` → `geometric_discover {layer, facets, axes, limit}` | `layer` = shape word or key (`3` = every service, default); `facets` = axis → word or words (any-of); `axes` = axis → `[lo, hi]` of words or fractions. Axes not named do not count. Answers the daemon's `results`: `{service_id, shape, environment, colour, metadata}`. |
+| `gNodeClient::geometricDiscover` / `findServices` / `discoverByCapabilities` / `discoverRange` | legacy entry points, all through `Topology\Query::fromLegacy` | a word is a facet, a list any-of, `min`/`max` `gte`/`lte` or `[lo, hi]` an axis range; a number is refused |
+| `gNodeClient::sendCommandToCapable` | `sendCommandToCapable(string $command, array $params, array $requirements, array $opts = []): array` → `sendRawCommand` with `_rt` = the query as JSON (`{layer, facets, axes}`) | the daemon resolves `_rt` **once per relay**: service by colour, placement by its ring (weighted round-robin; weight 0 = standby; sites are never relay targets). `candidate`/`exclude_self` are gone with the client-side pick. |
+| `gNodeClient::getPublishedCapabilitySchema` | `getPublishedCapabilitySchema(string $shape = 'daemon'): ?array` → `FCALL_RO GNODE_SCHEMA_GET 0 <ns> <shape key>` | reads `{<ns>}:gnode:constellation:schema:<shape>`: `schema_version, shape, name, width (24), layer_code, layer_hi, slots, dimension_index, dimension_values, fundamentality_default`; `null` when not yet published |
+| `gNodeClient::getServiceCapabilities` | `getServiceCapabilities(string $id): ?array` → `HGET {<ns>}:gnode:constellation:entities <id>` | `{service_id, shape, environment, capabilities (colour), metadata, load, health, registered_at}` |
+| `Topology\Declaration::SHAPES` | `site\|web → 3.1`, `app\|headless → 3.2`, `daemon\|service\|system → 3.3`, `component\|tool → 2`, `node → 1` | a legacy `tier` of `TOOL` is a component, any other tier a daemon |
+
+Removed with the one topology (no replacement; the daemon codes): `geometricStoreTopology`, `translateCapabilitiesToCoordinates`, `translateCoordinatesToHuman`, `getBuiltinCapabilitySchema`, the `dep*` / `registry*` / `cross*` wrappers (`GNODE_DEP_*`, `GNODE_REGISTRY_*`, `GNODE_CROSS_*` retired), `gNodeConfig::getTopologyKey`.
 
 ## 2. CONSUMES / REQUIRES
 

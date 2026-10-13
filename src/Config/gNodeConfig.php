@@ -228,24 +228,6 @@ class gNodeConfig
     }
 
     /**
-     * Get topology key
-     *
-     * Pattern: {topology_namespace}:gnode:topology
-     * Default: {geodineum}:gnode:topology
-     *
-     * This is the shared topology key where ALL services across all sites register.
-     * Using a unified namespace (instead of per-site keys) ensures the daemon can
-     * discover all services regardless of which site they belong to.
-     *
-     * @return string Topology key
-     */
-    public function getTopologyKey(): string
-    {
-        $namespace = $this->config['topology_namespace'];
-        return "{{$namespace}}:gnode:topology";
-    }
-
-    /**
      * Get topology namespace
      *
      * @return string Topology namespace (default: "geodineum")

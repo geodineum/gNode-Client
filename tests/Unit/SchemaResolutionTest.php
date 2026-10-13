@@ -7,33 +7,34 @@ use gCore\gNode\gNodeClient;
 use gCore\gNode\Storage\StorageInterface;
 
 /**
- * The dimension count and index map must come from the daemon, not from a copy.
- *
- * Four private copies of this map existed at once — this client's static schema,
- * its getDimensionIndex table, gCore's geometric_topology.yaml and the Lua
- * libraries — and six indices disagreed. Nothing failed loudly. discoverRange()
- * sends an index on the wire, so a query for service_tier constrained
- * health_status instead and returned confident, wrong matches.
- *
- * These tests pin the precedence: published wins, built-in is the fallback, and
- * a fallback is announced rather than passed off as the answer.
+ * The per-shape schema comes from the daemon, never from a copy in this client. These
+ * pin that the client asks by shape key, decodes what the daemon published, and answers
+ * the one topology's width when nothing is published yet.
  */
 class SchemaResolutionTest extends TestCase
 {
-    /** Storage that answers GNODE_SCHEMA_GET with a flat HGETALL array. */
-    private function storageWithSchema(array $index, int $total, int $discovery)
+    private array $asked = [];
+
+    private function storageWithSchema(array $index, array $slots)
     {
         $storage = $this->createMock(StorageInterface::class);
         $storage->method('isConnected')->willReturn(true);
         $storage->method('ping')->willReturn(true);
-        $storage->method('fcallRo')->willReturn([
-            'schema_version', '3.0',
-            'tier', 'service',
-            'total_dimensions', (string) $total,
-            'discovery_dimensions', (string) $discovery,
-            'dimension_index', json_encode($index),
-            'dimension_values', json_encode(['protocol' => ['http_rest' => 0.10]]),
-        ]);
+        $storage->method('fcallRo')->willReturnCallback(function (string $fn, array $keys, array $args) use ($index, $slots) {
+            $this->asked[] = [$fn, $args];
+            return [
+                'schema_version', '5.0',
+                'shape', $args[1],
+                'name', 'daemon',
+                'width', '24',
+                'layer_code', '3',
+                'layer_hi', '4',
+                'slots', json_encode($slots),
+                'dimension_index', json_encode($index),
+                'dimension_values', json_encode(['protocol' => ['http_rest' => 0.10]]),
+                'fundamentality_default', '0.3',
+            ];
+        });
 
         return $storage;
     }
@@ -43,72 +44,57 @@ class SchemaResolutionTest extends TestCase
         return new gNodeClient($storage, 'test_site', 'test-node', ['use_fallback' => false]);
     }
 
-    /**
-     * @test
-     */
-    public function the_published_count_wins_over_the_builtin(): void
+    private function slots(int $provider, int $other): array
     {
-        $c = $this->client($this->storageWithSchema(['protocol' => 0, 'environment' => 20], 30, 25));
-
-        $this->assertSame(30, $c->capabilityDimensionCount());
-        $this->assertSame(25, $c->capabilityDiscoveryWidth());
+        $s = [];
+        for ($i = 0; $i < $provider; $i++) {
+            $s[$i] = ['name' => "a{$i}", 'kind' => 'colour', 'many' => false, 'writer' => 'provider', 'static' => true, 'freeform' => false];
+        }
+        for ($j = 0; $j < $other; $j++) {
+            $s[16 + $j] = ['name' => "d{$j}", 'kind' => 'ordered', 'many' => false, 'writer' => 'sampler', 'static' => false, 'freeform' => false];
+        }
+        return $s;
     }
 
-    /**
-     * @test
-     */
-    public function a_published_index_overrides_the_builtin_one(): void
+    /** @test */
+    public function the_client_asks_by_shape_key_and_decodes_what_was_published(): void
     {
-        // environment is 18 in the built-in table and 20 in the daemon. The
-        // wrong one here is not a cosmetic difference: it is the number that
-        // goes on the wire in a range query.
-        $c = $this->client($this->storageWithSchema(['environment' => 20], 30, 25));
+        $c = $this->client($this->storageWithSchema(['protocol' => 2, 'domain' => 3], $this->slots(14, 3)));
 
-        $m = new \ReflectionMethod($c, 'getDimensionIndex');
-        $m->setAccessible(true);
-        $this->assertSame(20, $m->invoke($c, 'environment'));
+        $schema = $c->getPublishedCapabilitySchema('daemon');
+        self::assertSame(['GNODE_SCHEMA_GET', ['geodineum', '3.3']], $this->asked[0], 'a shape word becomes its key on the wire');
+        self::assertSame('5.0', $schema['schema_version']);
+        self::assertSame(24, $schema['width']);
+        self::assertSame(['protocol' => 2, 'domain' => 3], $schema['dimension_index']);
+        self::assertSame(0.10, $schema['dimension_values']['protocol']['http_rest']);
+        self::assertSame(0.3, $schema['fundamentality_default']);
+        self::assertSame('provider', $schema['slots'][0]['writer']);
+
+        self::assertSame(24, $c->capabilityDimensionCount('daemon'));
+        self::assertSame(14, $c->capabilityDiscoveryWidth('daemon'), 'declared slots are the provider-written ones');
+        self::assertSame(['protocol' => 2, 'domain' => 3], $c->getCapabilityDimensions('daemon'));
+        self::assertCount(1, $this->asked, 'cached per shape');
     }
 
-    /**
-     * @test
-     */
-    public function nothing_published_falls_back_and_stays_usable(): void
+    /** @test */
+    public function nothing_published_answers_the_one_topology_width(): void
     {
         $storage = $this->createMock(StorageInterface::class);
         $storage->method('isConnected')->willReturn(true);
         $storage->method('ping')->willReturn(true);
-        $storage->method('fcallRo')->willThrowException(new \RuntimeException('no such function'));
+        $storage->method('fcallRo')->willThrowException(new \RuntimeException('No schema published'));
         $c = $this->client($storage);
 
-        // The fallback must be the CURRENT service width, not the historical 23.
-        $this->assertSame(30, $c->capabilityDimensionCount());
-        $this->assertSame(25, $c->capabilityDiscoveryWidth());
+        self::assertNull($c->getPublishedCapabilitySchema('site'));
+        self::assertSame(24, $c->capabilityDimensionCount('site'));
+        self::assertSame(16, $c->capabilityDiscoveryWidth('site'));
     }
 
-    /**
-     * @test
-     */
-    public function the_builtin_copy_is_frozen_not_quietly_drifting(): void
+    /** @test */
+    public function an_unknown_shape_is_refused_before_the_wire(): void
     {
-        // Kept deliberately as the no-daemon fallback, and pinned at the width
-        // it actually describes. If someone bumps this number without adding the
-        // seven missing dimensions, the copy starts lying again — this is the
-        // assertion that stops that being invisible.
-        $b = gNodeClient::getBuiltinCapabilitySchema();
-        $this->assertSame(23, $b['total_dimensions']);
-        $this->assertCount(23, $b['dimensions']);
-        $this->assertArrayHasKey('http_rest', $b['dimensions']['protocol']['values']);
-    }
-
-    /**
-     * @test
-     */
-    public function coordinate_width_follows_the_published_schema(): void
-    {
-        $c = $this->client($this->storageWithSchema(['protocol' => 0], 30, 25));
-
-        // Was array_fill(0, 23, 0.0): a literal that could not widen with the
-        // schema, so five dimensions had nowhere to land.
-        $this->assertCount(30, $c->translateCapabilitiesToCoordinates(['protocol' => 'http_rest']));
+        $c = $this->client($this->storageWithSchema([], []));
+        $this->expectException(\InvalidArgumentException::class);
+        $c->getPublishedCapabilitySchema('galaxy');
     }
 }

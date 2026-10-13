@@ -1,69 +1,63 @@
 <?php
 declare(strict_types=1);
 namespace gCore\gNode\Tests\Unit;
+
+use gCore\gNode\gNodeClient as Client;
+use gCore\gNode\Storage\StorageInterface;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Capability routing: selection logic, exercised without a live daemon.
- *
- * The daemon-facing half (findServices / sendRawCommand) is integration
- * territory; what is unit-testable — and what actually decides where work goes
- * — is the candidate selection. Every branch below is a way the caller could be
- * sent somewhere it did not intend.
+ * Capability routing on the one topology: the client puts the QUERY in `_rt` and the
+ * daemon's ring picks the placement, once per relay. What is unit-testable is that the
+ * query reaching the wire is the one the caller meant, and that nothing is sent when
+ * the caller named nothing.
  */
 final class CapRouteTest extends TestCase
 {
-    /** Mirrors sendCommandToCapable()'s selection, isolated from transport. */
-    private function pick(array $candidates, string $self, bool $excludeSelf, int $wanted): ?string
+    private array $sent = [];
+
+    private function client(): Client
     {
-        $viable = [];
-        foreach ($candidates as $c) {
-            $id = $c['id'] ?? $c['service_id'] ?? $c['name'] ?? null;
-            if ($id === null) { continue; }
-            if ($excludeSelf && $id === $self) { continue; }
-            $viable[] = $id;
-        }
-        if (empty($viable)) { return null; }
-        return $viable[min(max(0,$wanted), count($viable) - 1)];
+        $storage = $this->createMock(StorageInterface::class);
+        $storage->method('isConnected')->willReturn(true);
+        $storage->method('ping')->willReturn(true);
+        $client = $this->getMockBuilder(Client::class)
+            ->setConstructorArgs([$storage, 'web', 'test-node', ['use_fallback' => false]])
+            ->onlyMethods(['sendRawCommand'])
+            ->getMock();
+        $client->method('sendRawCommand')->willReturnCallback(function (string $c, array $p, array $f) {
+            $this->sent[] = [$c, $p, $f];
+            return ['success' => true];
+        });
+        return $client;
     }
 
-    public function testPicksBestMatchFirst(): void
+    public function testNoRequirementsSendsNothing(): void
     {
-        $c = [['id' => 'gpu_80gb'], ['id' => 'gpu_24gb']];
-        self::assertSame('gpu_80gb', $this->pick($c, 'web', true, 0),
-            'discovery returns best-first; routing must not reorder it');
+        $r = $this->client()->sendCommandToCapable('infer', ['x' => 1], []);
+        self::assertFalse($r['success']);
+        self::assertSame([], $this->sent, 'an unqualified relay is refused in the caller');
     }
 
-    public function testSelfIsExcludedByDefault(): void
+    public function testLegacyWordsBecomeTheRelayQuery(): void
     {
-        $c = [['id' => 'web'], ['id' => 'gpu_80gb']];
-        self::assertSame('gpu_80gb', $this->pick($c, 'web', true, 0),
-            'a node must not relay work to itself by default');
-        self::assertSame('web', $this->pick($c, 'web', false, 0),
-            'exclude_self=false is how a caller opts into running it locally');
+        $r = $this->client()->sendCommandToCapable('infer', ['x' => 1], ['domain' => 'ml_inference', 'protocol' => 'gnode_stream'], ['layer' => 'daemon']);
+        self::assertTrue($r['success']);
+        [$c, $p, $f] = $this->sent[0];
+        self::assertSame('infer', $c);
+        self::assertSame(['x' => 1], $p);
+        self::assertSame(['layer' => '3.3', 'facets' => ['domain' => 'ml_inference', 'protocol' => 'gnode_stream']], json_decode($f['_rt'], true));
     }
 
-    public function testNoViableTargetIsNullNotAGuess(): void
+    public function testAnExplicitQueryPassesThrough(): void
     {
-        self::assertNull($this->pick([], 'web', true, 0));
-        self::assertNull($this->pick([['id' => 'web']], 'web', true, 0),
-            'the only candidate being self must fail loudly, not fall back to local');
+        $this->client()->sendCommandToCapable('infer', [], ['layer' => '3.3', 'facets' => ['domain' => 'ml_inference'], 'axes' => ['contract_version' => ['v2', 'v5']]]);
+        self::assertSame('{"layer":"3.3","facets":{"domain":"ml_inference"},"axes":{"contract_version":["v2","v5"]}}', $this->sent[0][2]['_rt']);
     }
 
-    public function testCandidateIndexSpillsDeliberatelyAndClamps(): void
+    public function testANumericRequirementIsRefused(): void
     {
-        $c = [['id' => 'a'], ['id' => 'b'], ['id' => 'c']];
-        self::assertSame('b', $this->pick($c, 'x', true, 1), 'second choice on request');
-        self::assertSame('c', $this->pick($c, 'x', true, 99),
-            'an out-of-range index clamps to the worst viable rather than erroring');
-        self::assertSame('a', $this->pick($c, 'x', true, -5), 'negative clamps to best');
-    }
-
-    public function testAlternateIdFieldsAreAccepted(): void
-    {
-        self::assertSame('svc', $this->pick([['service_id' => 'svc']], 'x', true, 0));
-        self::assertSame('nm',  $this->pick([['name' => 'nm']], 'x', true, 0));
-        self::assertNull($this->pick([['score' => 0.9]], 'x', true, 0),
-            'a candidate with no usable id must be skipped, not sent to an empty target');
+        $this->expectException(\InvalidArgumentException::class);
+        $this->client()->sendCommandToCapable('infer', [], ['performance' => 0.9]);
     }
 }

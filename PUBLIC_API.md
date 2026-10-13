@@ -45,10 +45,10 @@
 - `checkRateLimit(string $operation, int $limit = 100, int $window = 60, array $metadata = []): array` — Check rate limit using GNODE_SERVICE_RATE_LIMIT Lua function
 - `getCacheStats(): array` — Get cache statistics
 - `invalidateCache(?string $pattern = null): int` — Invalidate cache
-- `geometricStoreTopology(array $topology, int $dimensions = 8): bool` — Store topology information
-- `geometricDiscover(array $capabilities, int $limit = 10, float $threshold = 0.0): array` — Rank services by distance over the capability axes you name
-- `discoverRange(array $criteria): array` — Discover services using range query operators
-- `getCapabilityDimensions(): array` — Get registered capability dimensions
+- `geometricDiscover(array $requirements, int $limit = 10, string $layer = '3'): array` — Discover services on the one topology by the words of their declaration
+- `query(array $query): array` — One discovery, as Query::build() shapes it
+- `discoverRange(array $criteria, string $layer = '3'): array` — Discover services using range query operators
+- `getCapabilityDimensions(string $shape = 'daemon'): array` — Get registered capability dimensions
 - `getBundle(bool $decompress = true)` — Get entire site bundle
 - `getBundled(string $key, bool $decompress = true)` — Get a specific manifest bundle by key (instant key-based retrieval)
 - `invalidateBundle(): bool` — Invalidate the full site bundle
@@ -62,32 +62,6 @@
 - `assetGet(string $assetId): ?array` — Retrieve an asset by ID
 - `assetDelete(string $assetId): bool` — Delete an asset
 - `assetList(?string $contentType = null): array` — List assets for this site
-- `depRegister(string $topologyKey, array $serviceDefinition): array`  · _premium (gNode-TOPO)_
-- `depValidate(string $topologyKey, string $fromId, string $toId): array`  · _premium (gNode-TOPO)_
-- `depLoadOrder(string $topologyKey, bool $asLevels = false): array`  · _premium (gNode-TOPO)_
-- `depProviders(string $topologyKey, string $capability, string $forService = ''): array`  · _premium (gNode-TOPO)_
-- `depMissing(string $topologyKey, string $serviceId): array`  · _premium (gNode-TOPO)_
-- `depGetService(string $topologyKey, string $serviceId): ?array`  · _premium (gNode-TOPO)_
-- `depDeregister(string $topologyKey, string $serviceId): bool`  · _premium (gNode-TOPO)_
-- `depChain(string $topologyKey, string $serviceId, string $direction = 'down'): array`  · _premium (gNode-TOPO)_
-- `depStats(string $topologyKey): array`  · _premium (gNode-TOPO)_
-- `registryCreate(): array`  · _premium (gNode-TOPO)_
-- `registryAdd(array $topologyDefinition): array`  · _premium (gNode-TOPO)_
-- `registryGet(string $topologyId): ?array`  · _premium (gNode-TOPO)_
-- `registryList(string $filterType = ''): array`  · _premium (gNode-TOPO)_
-- `registryRemove(string $topologyId, bool $deleteData = false): bool`  · _premium (gNode-TOPO)_
-- `registryMapEntity(string $entityId, string $topologyId, string $entityKeyInTopo): array`  · _premium (gNode-TOPO)_
-- `registryEntityTopologies(string $entityId): array`  · _premium (gNode-TOPO)_
-- `registryStats(): array`  · _premium (gNode-TOPO)_
-- `registryUpdate(string $topologyId, array $updates): array`  · _premium (gNode-TOPO)_
-- `registrySearch(string $query, string $searchType = 'name'): array`  · _premium (gNode-TOPO)_
-- `crossIntersection(array $topologyIds): array`
-- `crossUnion(array $topologyIds): array`
-- `crossEntityView(string $entityId): array`
-- `crossFindRelated(string $entityId, string $direction = 'both'): array`
-- `crossMultiQuery(array $query): array`
-- `crossComparePositions(string $entityId): array`
-- `crossTopologyDiff(string $topologyId1, string $topologyId2): array`
 - `featureSet(string $featureName, bool $enabled = true, int $rolloutPercentage = 100, string $description = '', array $targetingRules = []): array`
 - `featureEvaluate(string $featureName, string $userId, array $userContext = []): array`
 - `featureList(): array`

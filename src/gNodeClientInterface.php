@@ -249,38 +249,37 @@ interface gNodeClientInterface
 
 
     /**
-     * Store topology information
+     * Discover services on the one topology by the words of their declaration
      *
-     * @param array $topology Topology structure to store
-     * @param int $dimensions Number of dimensions
-     * @return bool Success status
+     * @param array $requirements Axis name => word | words | [lo, hi] range; axes left out do not count
+     * @param int $limit Maximum number of services to return
+     * @param string $layer Shape word or layer key; default every service
+     * @return array Records with service_id, shape, environment, colour, metadata
      */
-    public function geometricStoreTopology(array $topology, int $dimensions = 8): bool;
+    public function geometricDiscover(array $requirements, int $limit = 10, string $layer = '3'): array;
 
     /**
-     * Rank services by distance over the capability axes you name
+     * One discovery, as Query::build() shapes it
      *
-     * @param array $capabilities Axis name => value in [0, 1]; axes left out do not count
-     * @param int $limit Maximum number of services to return
-     * @param float $threshold Drop services farther than this distance; 0 keeps all
-     * @return array List of ['service_id' => string, 'distance' => float], nearest first
+     * @param array $query {layer, facets, axes, limit}
+     * @return array Records with service_id, shape, environment, colour, metadata
      */
-    public function geometricDiscover(array $capabilities, int $limit = 10, float $threshold = 0.0): array;
+    public function query(array $query): array;
 
     /**
      * Discover services using range query operators
      *
-     * @param array $criteria Associative array of dimension => constraint
-     * @return array Array of service IDs matching all criteria
+     * @param array $criteria Axis name => word | words | constraint
+     * @param string $layer Shape word or layer key; default every service
      */
-    public function discoverRange(array $criteria): array;
+    public function discoverRange(array $criteria, string $layer = '3'): array;
 
     /**
      * Get registered capability dimensions
      *
-     * @return array Map of capability names to dimensions
+     * @param string $shape Shape word or key
      */
-    public function getCapabilityDimensions(): array;
+    public function getCapabilityDimensions(string $shape = 'daemon'): array;
 
     //=========================================================================
     // BUNDLE OPERATIONS
@@ -396,47 +395,6 @@ interface gNodeClientInterface
      * @return array Asset summaries
      */
     public function assetList(?string $contentType = null): array;
-
-    //=========================================================================
-    // DEPENDENCY TOPOLOGY (gNode-Multi-Topology-Pro)
-    //=========================================================================
-
-    public function depRegister(string $topologyKey, array $serviceDefinition): array;
-    public function depValidate(string $topologyKey, string $fromId, string $toId): array;
-    public function depLoadOrder(string $topologyKey, bool $asLevels = false): array;
-    public function depProviders(string $topologyKey, string $capability, string $forService = ''): array;
-    public function depMissing(string $topologyKey, string $serviceId): array;
-    public function depGetService(string $topologyKey, string $serviceId): ?array;
-    public function depDeregister(string $topologyKey, string $serviceId): bool;
-    public function depChain(string $topologyKey, string $serviceId, string $direction = 'down'): array;
-    public function depStats(string $topologyKey): array;
-
-    //=========================================================================
-    // TOPOLOGY REGISTRY (gNode-Multi-Topology-Pro)
-    //=========================================================================
-
-    public function registryCreate(): array;
-    public function registryAdd(array $topologyDefinition): array;
-    public function registryGet(string $topologyId): ?array;
-    public function registryList(string $filterType = ''): array;
-    public function registryRemove(string $topologyId, bool $deleteData = false): bool;
-    public function registryMapEntity(string $entityId, string $topologyId, string $entityKeyInTopo): array;
-    public function registryEntityTopologies(string $entityId): array;
-    public function registryStats(): array;
-    public function registryUpdate(string $topologyId, array $updates): array;
-    public function registrySearch(string $query, string $searchType = 'name'): array;
-
-    //=========================================================================
-    // CROSS-TOPOLOGY (gNode-Multi-Topology-Pro)
-    //=========================================================================
-
-    public function crossIntersection(array $topologyIds): array;
-    public function crossUnion(array $topologyIds): array;
-    public function crossEntityView(string $entityId): array;
-    public function crossFindRelated(string $entityId, string $direction = 'both'): array;
-    public function crossMultiQuery(array $query): array;
-    public function crossComparePositions(string $entityId): array;
-    public function crossTopologyDiff(string $topologyId1, string $topologyId2): array;
 
     //=========================================================================
     // FEATURE FLAGS & A/B TESTING (gNode-Observability-Pro)

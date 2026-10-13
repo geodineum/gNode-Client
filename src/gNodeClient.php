@@ -12,6 +12,8 @@ use gCore\gNode\Exception\ConnectionException;
 use gCore\gNode\Exception\ConfigException;
 use gCore\gNode\Exception\StorageException;
 use gCore\gNode\Fallback\FallbackHandler;
+use gCore\gNode\Topology\Declaration;
+use gCore\gNode\Topology\Query;
 
 /**
  * gNodeClient - Standalone FCALL-Only gNode Client
@@ -125,32 +127,6 @@ class gNodeClient implements gNodeClientInterface
      * @var array<string, array>
      */
     protected $schemaCache = [];
-
-    /**
-     * Last-resort dimension counts, used ONLY when the daemon has published no
-     * schema. These mirror daemon/config/*_schema.yaml at the time of writing
-     * and are exactly the thing that goes stale — which is why
-     * capabilityDimensionCount() logs whenever it falls back to them rather
-     * than quietly returning a plausible number.
-     */
-    protected const FALLBACK_DIMENSIONS = [
-        'service'       => 30,
-        'tool'          => 16,
-        'constellation' => 20,
-        'galaxy'        => 20,
-    ];
-
-    /**
-     * The discovery subset of the above — the dimensions that take part in
-     * bucket-key hashing. Never equal to the total, and confusing the two is
-     * silent: too wide a key simply matches nothing.
-     */
-    protected const FALLBACK_DISCOVERY_DIMENSIONS = [
-        'service'       => 25,
-        'tool'          => 12,
-        'constellation' => 16,
-        'galaxy'        => 16,
-    ];
 
     /** @var array Configuration */
     protected $config;
@@ -1754,205 +1730,83 @@ class gNodeClient implements gNodeClientInterface
     //=========================================================================
 
     /**
-     * Store topology information
+     * Discover services on the one topology by the words of their declaration.
      *
-     * @param array $topology Topology structure to store
-     * @param int $dimensions Number of dimensions
-     * @return bool Success status
+     * `$requirements` is a map of axis name → word (a facet), → list of words (any of),
+     * or → `[lo, hi]` / `['min' => .., 'max' => ..]` (an axis range). A number is refused:
+     * the client names, the daemon codes. Results carry `service_id`, `shape`,
+     * `environment`, `colour` (the declared words) and `metadata`.
+     *
+     * @param array $requirements Axis name => word | words | range
+     * @param int $limit Maximum number of services to return
+     * @param string $layer Shape word or layer key to search; default every service (layer 3)
+     * @return array Records, sorted by the daemon
      */
-    public function geometricStoreTopology(array $topology, int $dimensions = 8): bool
+    public function geometricDiscover(array $requirements, int $limit = 10, string $layer = '3'): array
     {
-        $response = $this->sendCommand('geometric_store_topology', [
-            'data' => $topology
-        ]);
-
-        if ($response && isset($response['status']) && $response['status'] === 'ok') {
-            return true;
+        if (isset($requirements[0])) {
+            throw new \InvalidArgumentException('geometricDiscover takes [axis => word]; a bare list names nothing');
         }
-
-        if ($response && isset($response['status']) && $response['status'] === 'error') {
-            throw new gNodeException($response['error'] ?? 'Unknown error storing topology');
-        }
-
-        return false;
+        return $this->query(Query::fromLegacy($requirements, $limit, $layer));
     }
 
     /**
-     * Rank services by distance over the capability axes you name
+     * One discovery on the one topology: `{layer, facets, axes, limit}` as Query builds it.
      *
-     * Axes you leave out do not count. Axis names and value codes come from the
-     * published schema (getCapabilityDimensions / GNODE_SCHEMA_GET).
-     *
-     * @param array $capabilities Axis name => value in [0, 1]
-     * @param int $limit Maximum number of services to return
-     * @param float $threshold Drop services farther than this distance; 0 keeps all
-     * @return array List of ['service_id' => string, 'distance' => float], nearest first
+     * @param array $query From Query::build() or Query::fromLegacy()
+     * @return array Records with service_id, shape, environment, colour, metadata
+     * @throws gNodeException When the daemon refuses the query
      */
-    public function geometricDiscover(array $capabilities, int $limit = 10, float $threshold = 0.0): array
+    public function query(array $query): array
     {
-        if (empty($capabilities) || isset($capabilities[0])) {
-            throw new \InvalidArgumentException('geometricDiscover ranks by value: pass [axis => value]');
-        }
-
-        $response = $this->sendCommand('geometric_discover', [
-            'capabilities' => $capabilities,
-            'limit' => $limit,
-            'threshold' => $threshold
-        ]);
+        $response = $this->sendCommand('geometric_discover', $query);
 
         if ($response && isset($response['status']) && $response['status'] === 'ok') {
-            return $response['result']['results'] ?? [];
+            $result = $response['result'] ?? [];
+            if (isset($result['results']) && is_array($result['results'])) {
+                return $result['results'];
+            }
+            return is_array($result) ? $result : [];
         }
 
         if ($response && isset($response['status']) && $response['status'] === 'error') {
-            throw new gNodeException($response['error'] ?? 'Unknown error in geometric discovery');
+            throw new gNodeException($response['error'] ?? 'Unknown error in discovery');
         }
 
         return [];
     }
 
     /**
-     * Discover services using range query operators
+     * Discover services by axis ranges and facet words; answers the matching service ids.
      *
-     * @param array $criteria Associative array of dimension => constraint
-     * @return array Array of service IDs matching all criteria
+     * @param array $criteria Axis name => word | words | constraint (min/max, gte/lte, [lo, hi])
+     * @param string $layer Shape word or layer key; default every service
+     * @return array Service ids
      */
-    public function discoverRange(array $criteria): array
+    public function discoverRange(array $criteria, string $layer = '3'): array
     {
-        $requirements = [];
-
-        foreach ($criteria as $dimension => $constraint) {
-            if ($dimension === 'dimensions') {
-                foreach ($constraint as $dynDim => $dynConstraint) {
-                    $dimIndex = $this->getDimensionIndex($dynDim);
-                    $requirements[(string)$dimIndex] = $this->normalizeConstraint($dynConstraint);
-                }
-            } else {
-                $dimIndex = $this->getDimensionIndex($dimension);
-                $requirements[(string)$dimIndex] = $this->normalizeConstraint($constraint);
+        $ids = [];
+        foreach ($this->query(Query::fromLegacy($criteria, 0, $layer)) as $r) {
+            if (isset($r['service_id'])) {
+                $ids[] = (string) $r['service_id'];
             }
         }
-
-        $result = $this->executeCommand('geometric_discover_range', [
-            'requirements' => $requirements
-        ]);
-
-        // The daemon answers {services, count}; the local fallback answers a bare list.
-        if (isset($result['services']) && is_array($result['services'])) {
-            return $result['services'];
-        }
-        return is_array($result) ? $result : [];
+        return $ids;
     }
 
     /**
-     * Get registered capability dimensions
+     * The axis name → slot map of a shape, as the daemon published it.
      *
-     * @return array Map of capability names to dimensions
+     * @param string $shape Shape word or key; default the daemon shape (3.3)
+     * @return array Map of axis names to slots
      */
-    public function getCapabilityDimensions(): array
+    public function getCapabilityDimensions(string $shape = 'daemon'): array
     {
-        // The published schema first — same map, one round trip, and it is the
-        // one the daemon matches against.
-        $published = $this->getPublishedCapabilitySchema();
+        $published = $this->getPublishedCapabilitySchema($shape);
         if (!empty($published['dimension_index'])) {
             $this->capabilityDimensions = $published['dimension_index'];
-            return $this->capabilityDimensions;
         }
-
-        $response = $this->sendCommand('geometric_dimensions', []);
-
-        if ($response && isset($response['status']) && $response['status'] === 'ok') {
-            // is_array, not ?? — a daemon that answers ok with a scalar result
-            // assigned straight through and raised a TypeError from the return
-            // type, turning a malformed reply into a fatal in the caller.
-            $result = $response['result'] ?? null;
-            $this->capabilityDimensions = is_array($result) ? $result : [];
-            return $this->capabilityDimensions;
-        }
-
         return $this->capabilityDimensions;
-    }
-
-    /**
-     * Normalize constraint to operator format
-     *
-     * @param mixed $constraint Constraint value or operator array
-     * @return array Normalized operator array
-     */
-    protected function normalizeConstraint($constraint): array
-    {
-        if (!is_array($constraint)) {
-            return ['eq' => $constraint];
-        }
-        return $constraint;
-    }
-
-    /**
-     * Get dimension index for a dimension name
-     *
-     * @param string $name Dimension name
-     * @return int Dimension index
-     */
-    protected function getDimensionIndex(string $name): int
-    {
-        // Fallback only — see below. Generated from the daemon's
-        // service_schema.yaml v4.0: 0-15 declared and hashed, 16-18 derived,
-        // 19-22 storage. Ask the daemon first; this exists for a client that
-        // starts before the master does.
-        $static = [
-            // declared, hashed
-            'protocol' => 0,
-            'api_version' => 1,
-            'contract_stability' => 2,
-            'clearance_required' => 3,
-            'auth_method' => 4,
-            'data_sensitivity' => 5,
-            'service_scope' => 6,
-            'domain_primary' => 7,
-            'domain_secondary' => 8,
-            'specialization' => 9,
-            'throughput_tier' => 10,
-            'latency_class' => 11,
-            'reliability_tier' => 12,
-            'pipeline_stage' => 13,
-            'execution_priority' => 14,
-            'environment' => 15,
-            // derived
-            'current_load' => 16,
-            'health_status' => 17,
-            'lifecycle_state' => 18,
-            // storage
-            'native_format' => 19,
-            'implementation_language' => 20,
-            'data_persistence' => 21,
-            'service_tier' => 22,
-        ];
-
-        // The daemon first, the table second — and in that order deliberately.
-        // This index goes on the wire: discoverRange() sends it as the key of a
-        // range requirement, so the daemon dereferences OUR number against ITS
-        // schema. The table above has service_tier at 17 where the daemon has
-        // health_status, so a range query on service_tier silently constrained
-        // an unrelated dimension and returned confidently wrong matches.
-        $published = $this->getPublishedCapabilitySchema();
-        if (isset($published['dimension_index'][$name])) {
-            $i = (int) $published['dimension_index'][$name];
-            if (isset($static[$name]) && $static[$name] !== $i) {
-                $this->debug("dimension '{$name}': built-in index {$static[$name]}, daemon says {$i} — using {$i}");
-            }
-            return $i;
-        }
-
-        if (isset($static[$name])) {
-            return $static[$name];
-        }
-
-        $topology = $this->getTopology();
-        if (isset($topology['capability_dimensions'][$name])) {
-            return (int)$topology['capability_dimensions'][$name];
-        }
-
-        throw new \InvalidArgumentException("Unknown dimension: {$name}");
     }
 
     /**
@@ -2370,324 +2224,6 @@ class gNodeClient implements gNodeClientInterface
 
         $decoded = is_string($result) ? $this->safeJsonDecode($result, true) : $result;
         return is_array($decoded) ? $decoded : [];
-    }
-
-    //=========================================================================
-    // DEPENDENCY TOPOLOGY (gNode-Multi-Topology-Pro: gnode_dependency.lua)
-    //=========================================================================
-
-    /**
-     * Register a service in the dependency topology
-     *
-     * @param string $topologyKey Topology key
-     * @param array $serviceDefinition Service with id, provides[], requires[], position
-     * @return array Registration result with service_id, position, voxel_key
-     */
-    public function depRegister(string $topologyKey, array $serviceDefinition): array
-    {
-        return $this->fcallDecode('GNODE_DEP_REGISTER', [$topologyKey], [json_encode($serviceDefinition, JSON_UNESCAPED_SLASHES)]);
-    }
-
-    /**
-     * Validate a dependency edge between two services
-     *
-     * @param string $topologyKey Topology key
-     * @param string $fromId Source service ID
-     * @param string $toId Target service ID
-     * @return array Validation result with valid, reason, from_z, to_z
-     */
-    public function depValidate(string $topologyKey, string $fromId, string $toId): array
-    {
-        return $this->fcallDecode('GNODE_DEP_VALIDATE', [$topologyKey], [$fromId, $toId]);
-    }
-
-    /**
-     * Get topologically sorted load order for the dependency graph
-     *
-     * @param string $topologyKey Topology key
-     * @param bool $asLevels Return grouped by Z-level (true) or flat order (false)
-     * @return array Load order with levels[] or order[]
-     */
-    public function depLoadOrder(string $topologyKey, bool $asLevels = false): array
-    {
-        return $this->fcallDecode('GNODE_DEP_LOAD_ORDER', [$topologyKey], [$asLevels ? '1' : '0']);
-    }
-
-    /**
-     * Find providers of a capability
-     *
-     * @param string $topologyKey Topology key
-     * @param string $capability Capability name
-     * @param string $forService Service requesting the capability
-     * @return array Providers list
-     */
-    public function depProviders(string $topologyKey, string $capability, string $forService = ''): array
-    {
-        return $this->fcallDecode('GNODE_DEP_PROVIDERS', [$topologyKey], [$capability, $forService]);
-    }
-
-    /**
-     * Detect missing dependencies for a service
-     *
-     * @param string $topologyKey Topology key
-     * @param string $serviceId Service ID
-     * @return array Missing deps with is_satisfied flag
-     */
-    public function depMissing(string $topologyKey, string $serviceId): array
-    {
-        return $this->fcallDecode('GNODE_DEP_MISSING', [$topologyKey], [$serviceId]);
-    }
-
-    /**
-     * Get a service from the dependency graph
-     *
-     * @param string $topologyKey Topology key
-     * @param string $serviceId Service ID
-     * @return array|null Service data or null
-     */
-    public function depGetService(string $topologyKey, string $serviceId): ?array
-    {
-        $result = $this->fcallDecode('GNODE_DEP_GET_SERVICE', [$topologyKey], [$serviceId]);
-        return !empty($result) ? $result : null;
-    }
-
-    /**
-     * Deregister a service from the dependency graph
-     *
-     * @param string $topologyKey Topology key
-     * @param string $serviceId Service ID
-     * @return bool True if deregistered
-     */
-    public function depDeregister(string $topologyKey, string $serviceId): bool
-    {
-        $result = $this->fcallDecode('GNODE_DEP_DEREGISTER', [$topologyKey], [$serviceId]);
-        return !empty($result['success']);
-    }
-
-    /**
-     * Follow a dependency chain from a service
-     *
-     * @param string $topologyKey Topology key
-     * @param string $serviceId Starting service ID
-     * @param string $direction 'up' (dependents) or 'down' (dependencies)
-     * @return array Chain with service_id, direction, chain[], chain_length
-     */
-    public function depChain(string $topologyKey, string $serviceId, string $direction = 'down'): array
-    {
-        return $this->fcallDecode('GNODE_DEP_CHAIN', [$topologyKey], [$serviceId, $direction]);
-    }
-
-    /**
-     * Get dependency topology statistics
-     *
-     * @param string $topologyKey Topology key
-     * @return array Stats with service_count, edge_count, z_distribution
-     */
-    public function depStats(string $topologyKey): array
-    {
-        return $this->fcallDecode('GNODE_DEP_STATS', [$topologyKey]);
-    }
-
-    //=========================================================================
-    // TOPOLOGY REGISTRY (gNode-Multi-Topology-Pro: gnode_topology_registry.lua)
-    //=========================================================================
-
-    /**
-     * Create/initialize the topology registry for a site
-     *
-     * @return array Result with site_id, status, topology_count
-     */
-    public function registryCreate(): array
-    {
-        return $this->fcallDecode('GNODE_REGISTRY_CREATE', [$this->siteKey('topology:registry')]);
-    }
-
-    /**
-     * Add a named topology to the registry
-     *
-     * @param array $topologyDefinition Topology with name, type, dimensions, description
-     * @return array Result with topology_id, name, type, data_key
-     */
-    public function registryAdd(array $topologyDefinition): array
-    {
-        return $this->fcallDecode('GNODE_REGISTRY_ADD', [$this->siteKey('topology:registry')], [json_encode($topologyDefinition, JSON_UNESCAPED_SLASHES)]);
-    }
-
-    /**
-     * Get a topology from the registry
-     *
-     * @param string $topologyId Topology ID
-     * @return array|null Topology definition or null
-     */
-    public function registryGet(string $topologyId): ?array
-    {
-        $result = $this->fcallDecode('GNODE_REGISTRY_GET', [$this->siteKey('topology:registry')], [$topologyId]);
-        return !empty($result) ? $result : null;
-    }
-
-    /**
-     * List topologies in the registry
-     *
-     * @param string $filterType Optional type filter
-     * @return array Topology list
-     */
-    public function registryList(string $filterType = ''): array
-    {
-        return $this->fcallDecode('GNODE_REGISTRY_LIST', [$this->siteKey('topology:registry')], [$filterType]);
-    }
-
-    /**
-     * Remove a topology from the registry
-     *
-     * @param string $topologyId Topology ID
-     * @param bool $deleteData Also delete topology data
-     * @return bool True if removed
-     */
-    public function registryRemove(string $topologyId, bool $deleteData = false): bool
-    {
-        $result = $this->fcallDecode('GNODE_REGISTRY_REMOVE', [$this->siteKey('topology:registry')], [$topologyId, $deleteData ? '1' : '0']);
-        return !empty($result['success']);
-    }
-
-    /**
-     * Map an entity to a topology (cross-reference)
-     *
-     * @param string $entityId Entity ID
-     * @param string $topologyId Topology ID
-     * @param string $entityKeyInTopo Entity's key within the topology
-     * @return array Result with entity_id, topology_id, total_topologies
-     */
-    public function registryMapEntity(string $entityId, string $topologyId, string $entityKeyInTopo): array
-    {
-        return $this->fcallDecode('GNODE_REGISTRY_MAP_ENTITY', [$this->siteKey('topology:registry')], [$entityId, $topologyId, $entityKeyInTopo]);
-    }
-
-    /**
-     * Find all topologies containing an entity
-     *
-     * @param string $entityId Entity ID
-     * @return array Topologies list with topology_id, name, type
-     */
-    public function registryEntityTopologies(string $entityId): array
-    {
-        return $this->fcallDecode('GNODE_REGISTRY_ENTITY_TOPOLOGIES', [$this->siteKey('topology:registry')], [$entityId]);
-    }
-
-    /**
-     * Get registry statistics
-     *
-     * @return array Stats with topology_count, entity_count, cross_refs
-     */
-    public function registryStats(): array
-    {
-        return $this->fcallDecode('GNODE_REGISTRY_STATS', [$this->siteKey('topology:registry')]);
-    }
-
-    /**
-     * Update a topology definition in the registry
-     *
-     * @param string $topologyId Topology ID
-     * @param array $updates Fields to update
-     * @return array Result with topology_id, updated_fields
-     */
-    public function registryUpdate(string $topologyId, array $updates): array
-    {
-        return $this->fcallDecode('GNODE_REGISTRY_UPDATE', [$this->siteKey('topology:registry')], [$topologyId, json_encode($updates, JSON_UNESCAPED_SLASHES)]);
-    }
-
-    /**
-     * Search topologies by name or metadata
-     *
-     * @param string $query Search query
-     * @param string $searchType Search type ('name', 'type', 'entity')
-     * @return array Search results
-     */
-    public function registrySearch(string $query, string $searchType = 'name'): array
-    {
-        return $this->fcallDecode('GNODE_REGISTRY_SEARCH', [$this->siteKey('topology:registry')], [$query, $searchType]);
-    }
-
-    //=========================================================================
-    // CROSS-TOPOLOGY (gNode-Multi-Topology-Pro: gnode_cross_topology.lua)
-    //=========================================================================
-
-    /**
-     * Find entities present in ALL given topologies
-     *
-     * @param array $topologyIds Topology IDs
-     * @return array Intersection result with entities[]
-     */
-    public function crossIntersection(array $topologyIds): array
-    {
-        return $this->fcallDecode('GNODE_CROSS_INTERSECTION', [$this->siteKey('topology:cross')], [json_encode($topologyIds)]);
-    }
-
-    /**
-     * Union of entities across topologies
-     *
-     * @param array $topologyIds Topology IDs
-     * @return array Union result with entities[]
-     */
-    public function crossUnion(array $topologyIds): array
-    {
-        return $this->fcallDecode('GNODE_CROSS_UNION', [$this->siteKey('topology:cross')], [json_encode($topologyIds)]);
-    }
-
-    /**
-     * Unified view of an entity across all topologies
-     *
-     * @param string $entityId Entity ID
-     * @return array Views with topology_id, topology_name, entity_data, edges
-     */
-    public function crossEntityView(string $entityId): array
-    {
-        return $this->fcallDecode('GNODE_CROSS_ENTITY_VIEW', [$this->siteKey('topology:cross')], [$entityId]);
-    }
-
-    /**
-     * Find related entities across topology boundaries
-     *
-     * @param string $entityId Entity ID
-     * @param string $direction 'outgoing', 'incoming', or 'both'
-     * @return array Related entities
-     */
-    public function crossFindRelated(string $entityId, string $direction = 'both'): array
-    {
-        return $this->fcallDecode('GNODE_CROSS_FIND_RELATED', [$this->siteKey('topology:cross')], [$entityId, $direction]);
-    }
-
-    /**
-     * Multi-topology query
-     *
-     * @param array $query Query with topologies[], entity_filter, edge_filter
-     * @return array Query results
-     */
-    public function crossMultiQuery(array $query): array
-    {
-        return $this->fcallDecode('GNODE_CROSS_MULTI_QUERY', [$this->siteKey('topology:cross')], [json_encode($query, JSON_UNESCAPED_SLASHES)]);
-    }
-
-    /**
-     * Compare an entity's position across topologies
-     *
-     * @param string $entityId Entity ID
-     * @return array Positions and correlations across topologies
-     */
-    public function crossComparePositions(string $entityId): array
-    {
-        return $this->fcallDecode('GNODE_CROSS_COMPARE_POSITIONS', [$this->siteKey('topology:cross')], [$entityId]);
-    }
-
-    /**
-     * Diff two topologies — entities only in one or both
-     *
-     * @param string $topologyId1 First topology
-     * @param string $topologyId2 Second topology
-     * @return array Diff with only_in_1, only_in_2, in_both
-     */
-    public function crossTopologyDiff(string $topologyId1, string $topologyId2): array
-    {
-        return $this->fcallDecode('GNODE_CROSS_TOPOLOGY_DIFF', [$this->siteKey('topology:cross')], [$topologyId1, $topologyId2]);
     }
 
     //=========================================================================
@@ -4347,39 +3883,20 @@ class gNodeClient implements gNodeClientInterface
     //=========================================================================
     // SERVICE REGISTRATION & DISCOVERY
     //=========================================================================
+
     /**
-     * Send a command to whichever service can actually do the work.
+     * Send a command to whichever service answers a capability query.
      *
-     * The producer says WHAT it needs, not WHICH machine — discovery answers
-     * "who can do this" against the capability space, and the relay delivers.
-     * Both halves already existed and were simply never joined up; callers were
-     * hard-coding a target site, which is why adding a node meant editing
-     * producers.
+     * The query rides in `_rt`; the daemon resolves it once per relay, choosing the
+     * service by colour and the placement by its ring (weighted round-robin, standby
+     * weight 0 excluded). Sites are never relay targets. A query that matches nothing
+     * errors at the daemon rather than running here.
      *
-     * Capability, not a routing hint. A node's abilities live in the topology as
-     * DIMENSIONS with magnitudes, so "an inference host with at least this much
-     * memory" is expressible and resolves to the better of two GPU boxes. A flat
-     * hint string cannot say how MUCH of a capability a node has, which is why
-     * the `_gh`/node-type mechanism was never going to answer this question and
-     * is documented as unenforced rather than finished.
-     *
-     * Delivery is at-least-once via the relay path, and the reply comes back
-     * through the same correlation the caller already uses — routing is a
-     * targeting decision, not a different protocol.
-     *
-     *   $client->sendCommandToCapable('infer',
-     *       ['prompt' => $text],
-     *       ['domain_primary' => 'compute', 'latency_class' => 'interactive']);
-     *
-     * @param string $command    Command name
-     * @param array  $parameters Command parameters
-     * @param array  $requirements Capability requirements (human-readable names
-     *                             or coordinates, same vocabulary as
-     *                             registerService)
-     * @param array  $opts       'exclude_self' (bool, default true),
-     *                           'candidate'    (int, default 0 — pick the Nth
-     *                                           best, for deliberate spillover)
-     * @return array Response, or an error array naming what was unsatisfiable
+     * @param string $command Command name
+     * @param array $parameters Command parameters
+     * @param array $requirements Axis name => word | words | range, or {layer, facets, axes}
+     * @param array $opts `layer` (shape word or layer key, default every service)
+     * @return array Response from the service, or ['success' => false, 'error' => ...]
      */
     public function sendCommandToCapable(
         string $command,
@@ -4393,94 +3910,41 @@ class gNodeClient implements gNodeClientInterface
                              . 'use sendCommand() when the target is already known'];
         }
 
-        $candidates = $this->findServices($requirements);
-        if (empty($candidates)) {
-            // Deliberately NOT falling back to local execution. A silent
-            // fallback turns "no node can do this" into "the wrong node did it
-            // slowly", which is the failure that is hardest to see afterwards.
-            return ['success' => false,
-                    'error' => 'no service matches the requested capabilities',
-                    'requirements' => $requirements];
-        }
+        $layer = (string) ($opts['layer'] ?? '3');
+        $query = isset($requirements['facets']) || isset($requirements['axes']) || isset($requirements['layer'])
+            ? Query::build((string) ($requirements['layer'] ?? $layer), $requirements['facets'] ?? [], $requirements['axes'] ?? [], 1)
+            : Query::fromLegacy($requirements, 1, $layer);
 
-        $excludeSelf = $opts['exclude_self'] ?? true;
-        $wanted = max(0, (int) ($opts['candidate'] ?? 0));
+        $this->debug(sprintf('capability routing: %s for %s', Query::relayTarget($query), $command));
 
-        $viable = [];
-        foreach ($candidates as $c) {
-            $id = $c['id'] ?? $c['service_id'] ?? $c['name'] ?? null;
-            if ($id === null) {
-                continue;
-            }
-            if ($excludeSelf && $id === $this->siteId) {
-                continue;
-            }
-            $viable[] = $id;
-        }
-
-        if (empty($viable)) {
-            return ['success' => false,
-                    'error' => $excludeSelf
-                        ? 'the only capable service is this one; pass exclude_self=false to run it here'
-                        : 'capable services were found but none carried a usable id',
-                    'requirements' => $requirements];
-        }
-
-        // findServices returns best-first. `candidate` selects deliberately
-        // further down that ordering rather than silently, so spilling to a
-        // second-choice node is a decision in the caller, not a surprise.
-        $target = $viable[min($wanted, count($viable) - 1)];
-
-        $this->debug(sprintf(
-            'capability routing: %d candidate(s), targeting %s for %s',
-            count($viable), $target, $command
-        ));
-
-        // `_rt` is the relay target the daemon resolves; `_rr` is filled in by
-        // the daemon so the reply comes back here.
-        return $this->sendRawCommand($command, $parameters, ['_rt' => $target]);
+        // `_rt` carries the query; the daemon picks the service by colour and the
+        // placement by its ring, once per relay. `_rr` is filled in by the daemon so
+        // the reply comes back here.
+        return $this->sendRawCommand($command, $parameters, ['_rt' => Query::relayTarget($query)]);
     }
 
     /**
-     * The capability schema the daemon is ACTUALLY matching against.
+     * The per-shape schema the daemon is matching against, read back from what it published.
      *
-     * The dimension count is per TIER by design — service 30, tool 16,
-     * constellation and galaxy 20, each with its own discovery subset — and that
-     * is fine. What was not fine is that every consumer kept a private copy of
-     * the answer: counts of 8, 9, 12, 16, 19, 23 and 25 were all present across
-     * this ecosystem at once, several stale by months, and nothing could tell
-     * you which was true without reading the daemon's YAML.
+     * Returns `schema_version`, `shape`, `name`, `width`, `layer_code`, `layer_hi`,
+     * `slots` (slot → {name, kind, many, writer, static, freeform}), `dimension_index`
+     * (axis name → slot), `dimension_values` (axis → word → fraction) and
+     * `fundamentality_default`. Cached per request.
      *
-     * So ask. The master publishes the schema it loaded; this reads it back, and
-     * a caller that uses it cannot disagree with the daemon by construction.
-     *
-     * Returns `total_dimensions`, `discovery_dimensions`, `schema_version`,
-     * `tier`, `source` (the file it came from), and `dimension_index` — the
-     * name→index map. The count alone will not let you build a coordinate
-     * vector; the index each named capability occupies is the part that drifts.
-     *
-     * Cached per request: this is read on hot paths and the schema does not
-     * change under a running daemon.
-     *
-     * @param string $tier service|tool|constellation|galaxy
+     * @param string $shape Shape word (site, app, daemon, component, node) or key (3.1 …)
      * @return array|null Schema, or null when nothing is published yet
      */
-    public function getPublishedCapabilitySchema(string $tier = 'service'): ?array
+    public function getPublishedCapabilitySchema(string $shape = 'daemon'): ?array
     {
-        if (isset($this->schemaCache[$tier])) {
-            return $this->schemaCache[$tier];
+        $key = Declaration::shapeKey($shape);
+        if (isset($this->schemaCache[$key])) {
+            return $this->schemaCache[$key];
         }
 
         try {
-            $flat = $this->storage->fcallRo(
-                'GNODE_SCHEMA_GET',
-                [],
-                [$this->topologyNamespace, $tier]
-            );
+            $flat = $this->storage->fcallRo('GNODE_SCHEMA_GET', [], [$this->topologyNamespace, $key]);
         } catch (\Throwable $e) {
-            // Not published yet, or an older daemon without the function.
-            // Absent is a legitimate answer here, not a failure.
-            $this->debug("capability schema unavailable for tier {$tier}: {$e->getMessage()}");
+            $this->debug("topology schema unavailable for shape {$key}: {$e->getMessage()}");
             return null;
         }
 
@@ -4488,126 +3952,69 @@ class gNodeClient implements gNodeClientInterface
             return null;
         }
 
-        // HGETALL comes back flat: field, value, field, value…
         $schema = [];
-        for ($i = 0; $i + 1 < count($flat); $i += 2) {
-            $schema[(string) $flat[$i]] = $flat[$i + 1];
+        if (array_is_list($flat)) {
+            for ($i = 0; $i + 1 < count($flat); $i += 2) {
+                $schema[(string) $flat[$i]] = $flat[$i + 1];
+            }
+        } else {
+            $schema = $flat;
         }
-        foreach (['dimension_index', 'dimension_values'] as $j) {
-            if (isset($schema[$j])) {
-                $decoded = json_decode((string) $schema[$j], true);
+        foreach (['slots', 'dimension_index', 'dimension_values'] as $j) {
+            if (isset($schema[$j]) && is_string($schema[$j])) {
+                $decoded = json_decode($schema[$j], true);
                 if (is_array($decoded)) {
                     $schema[$j] = $decoded;
                 }
             }
         }
-        foreach (['total_dimensions', 'discovery_dimensions'] as $n) {
+        foreach (['width', 'layer_code', 'layer_hi'] as $n) {
             if (isset($schema[$n])) {
                 $schema[$n] = (int) $schema[$n];
             }
         }
+        if (isset($schema['fundamentality_default']) && $schema['fundamentality_default'] !== '') {
+            $schema['fundamentality_default'] = (float) $schema['fundamentality_default'];
+        }
 
-        $this->schemaCache[$tier] = $schema;
+        $this->schemaCache[$key] = $schema;
 
         return $schema;
     }
 
     /**
-     * How many dimensions does this tier have, according to the daemon?
+     * The width of a shape's vector: every shape of the one topology is 24 slots.
      *
-     * Falls back to the built-in default when nothing is published — and SAYS SO
-     * in the debug log rather than returning a number that looks authoritative.
-     * A silently-wrong dimension count produces coordinate vectors of the wrong
-     * width, which fails as poor match quality rather than as an error, so the
-     * fallback being visible matters more than it usually would.
-     *
-     * @param string $tier service|tool|constellation|galaxy
-     * @return int Dimension count
+     * @param string $shape Shape word or key
+     * @return int Slot count
      */
-    public function capabilityDimensionCount(string $tier = 'service'): int
+    public function capabilityDimensionCount(string $shape = 'daemon'): int
     {
-        $schema = $this->getPublishedCapabilitySchema($tier);
-        if ($schema !== null && !empty($schema['total_dimensions'])) {
-            return (int) $schema['total_dimensions'];
-        }
-
-        $fallback = self::FALLBACK_DIMENSIONS[$tier] ?? self::FALLBACK_DIMENSIONS['service'];
-        $this->debug(
-            "capability schema not published for tier {$tier}; using built-in fallback "
-            . "{$fallback}. This is the number that goes stale — if it disagrees with "
-            . "the daemon, discovery quality degrades silently."
-        );
-
-        return $fallback;
+        $schema = $this->getPublishedCapabilitySchema($shape);
+        return $schema !== null && !empty($schema['width']) ? (int) $schema['width'] : 24;
     }
 
     /**
-     * How many of this tier's dimensions take part in discovery?
+     * How many of a shape's slots a provider declares (the rest are header and derived).
      *
-     * Distinct from capabilityDimensionCount(): service is 30 dimensions of
-     * which 25 are discovery, the remaining 5 being storage-only (visual
-     * topology and registration order). Passing the total where discovery is
-     * wanted widens the bucket key and matches nothing.
-     *
-     * @param string $tier service|tool|constellation|galaxy
-     * @return int Discovery dimension count
+     * @param string $shape Shape word or key
+     * @return int Declared slot count
      */
-    public function capabilityDiscoveryWidth(string $tier = 'service'): int
+    public function capabilityDiscoveryWidth(string $shape = 'daemon'): int
     {
-        $schema = $this->getPublishedCapabilitySchema($tier);
-        if ($schema !== null && !empty($schema['discovery_dimensions'])) {
-            return (int) $schema['discovery_dimensions'];
-        }
-
-        return self::FALLBACK_DISCOVERY_DIMENSIONS[$tier]
-            ?? self::FALLBACK_DISCOVERY_DIMENSIONS['service'];
-    }
-
-    /**
-     * The schema to actually translate against: published if there is one,
-     * built-in if not.
-     *
-     * Returns the built-in shape either way — `dimensions[name]['index']` and
-     * `['values']`, plus `total_dimensions` — so callers do not branch on where
-     * it came from. Only the numbers change, which is the entire point.
-     *
-     * When both exist and their indices disagree, that is logged per dimension.
-     * The published one wins: it is what the daemon is matching against, so a
-     * client that "corrects" it toward its own copy is just wrong in private.
-     *
-     * @param string $tier service|tool|constellation|galaxy
-     * @return array Schema in built-in shape
-     */
-    protected function resolveCapabilitySchema(string $tier = 'service'): array
-    {
-        $builtin = self::getBuiltinCapabilitySchema();
-        $published = $this->getPublishedCapabilitySchema($tier);
-
-        $index = $published['dimension_index'] ?? null;
-        if (!is_array($index) || $index === []) {
-            $this->debug(
-                "no published {$tier} schema; translating against the built-in copy, "
-                . "which is known to disagree with the daemon on seven dimensions"
-            );
-            return $builtin;
-        }
-
-        $values = $published['dimension_values'] ?? [];
-        $out = ['dimensions' => []];
-        foreach ($index as $name => $i) {
-            $out['dimensions'][$name] = [
-                'index'  => (int) $i,
-                'values' => $values[$name] ?? ($builtin['dimensions'][$name]['values'] ?? []),
-            ];
-            $was = $builtin['dimensions'][$name]['index'] ?? null;
-            if ($was !== null && (int) $was !== (int) $i) {
-                $this->debug("dimension '{$name}': built-in index {$was}, daemon says {$i} — using {$i}");
+        $schema = $this->getPublishedCapabilitySchema($shape);
+        if ($schema !== null && is_array($schema['slots'] ?? null)) {
+            $n = 0;
+            foreach ($schema['slots'] as $slot) {
+                if (($slot['writer'] ?? '') === 'provider') {
+                    $n++;
+                }
+            }
+            if ($n > 0) {
+                return $n;
             }
         }
-        $out['total_dimensions'] = (int) ($published['total_dimensions'] ?? count($index));
-        $out['schema_version'] = $published['schema_version'] ?? null;
-
-        return $out;
+        return 16;
     }
 
     /**
@@ -4636,95 +4043,30 @@ class gNodeClient implements gNodeClientInterface
 
 
     /**
-     * Register a SERVICE-tier service with the topology using human-readable capabilities
+     * Register a service on the one topology by the words of its declaration.
      *
-     * NOTE: TOOL-tier services (gCore managers) should NOT use this method.
-     * Tool-tier registration is a deploy-time operation handled by:
-     *   gnode-daemon register-tools --site <site_id>
-     * See: scripts/register-tools.sh
+     * `$capabilities` is `['shape' => 'daemon', 'axes' => [...]]`, or the legacy flat map of
+     * axis name → word (Declaration::fromLegacy renames and drops what the schema no longer
+     * has). Registration facts may ride in `$metadata`: `shape`, `environment`, `on`
+     * (node id, which also places the service), `capacity_weight`, `heartbeat`, `holds`,
+     * `requires`, `peers`, `constellation`. Numbers are refused: the daemon codes words.
      *
-     * This method is for SERVICE-tier and above (WordPress sites, business logic, etc.)
-     * that register at process startup, not per page load.
-     *
-     * Capabilities can be specified using natural language names:
-     *   $client->registerService('my-api', [
-     *       'protocol' => 'http_rest',
-     *       'native_format' => 'json',
-     *       'domain_primary' => 'compute',
-     *       'latency_class' => 'interactive',
-     *   ]);
-     *
-     * NOTE: For local services, registration is handled by the gNode daemon's
-     * periodic service discovery (reads geometric_topology.yaml).
-     * This method is for remote services or CLI one-time registration only.
+     * Truthiness: true only when the daemon ACKs status=ok; absence of ACK fails closed.
      *
      * @param string $id Service ID
-     * @param array $capabilities Array of capabilities (human-readable names or coordinates)
-     * @param array $metadata Optional metadata
+     * @param array $capabilities Declaration or legacy axis map
+     * @param array $metadata Metadata (and registration facts, see above)
      * @return bool Success
-     * @throws gNodeException On registration failure
      */
     public function registerService(string $id, array $capabilities, array $metadata = []): bool
     {
-        // Auto-inject classification dimensions (17-18) from metadata tier/environment
-        // This ensures all services registered via gNode-Client use the 23-dimension schema
-        $capabilities = $this->injectClassificationDimensions($capabilities, $metadata);
-
-        // Translate human-readable capability names (e.g., 'http_rest') to numeric coordinates (e.g., 0.10)
-        // The daemon expects HashMap<String, f64> — dimension names with float values
-        $numericCapabilities = [];
-        $schema = $this->resolveCapabilitySchema();
-        foreach ($capabilities as $name => $value) {
-            if (is_numeric($value)) {
-                $numericCapabilities[$name] = (float)$value;
-                continue;
-            }
-            // Look up string value in schema to get numeric coordinate
-            if (isset($schema['dimensions'][$name])) {
-                $dim = $schema['dimensions'][$name];
-                $values = $dim['values'] ?? [];
-                if ($values === 'same as domain_primary') {
-                    $values = $schema['dimensions']['domain_primary']['values'] ?? [];
-                }
-                if (is_array($values) && isset($values[$value])) {
-                    $numericCapabilities[$name] = (float)$values[$value];
-                } else {
-                    $this->debug("Unknown capability value '{$value}' for dimension '{$name}', defaulting to 0.0");
-                    $numericCapabilities[$name] = 0.0;
-                }
-            } else {
-                // Previously this branch did not exist: an unrecognised dimension
-                // was dropped from the registration silently. With the built-in
-                // schema missing seven of the daemon's dimensions, that meant a
-                // service could ask for network_zone or deployment_model and
-                // register without it, then never match a query that required it.
-                $this->debug(
-                    "Dimension '{$name}' is not in the schema being translated against "
-                    . "(source: " . ($schema['schema_version'] ?? 'built-in') . "); "
-                    . "DROPPED from this registration"
-                );
-            }
+        $built = Declaration::fromLegacy($id, $capabilities, $metadata);
+        if ($built['dropped'] !== []) {
+            $this->debug("Service '{$id}': axes not on the one topology, dropped: " . implode(', ', $built['dropped']));
         }
 
-        // Send registerService command via unified stream.
-        // The daemon's async handler (handle_register_service_async) processes
-        // this via FCALL GNODE_REGISTER_CAPABILITY_VECTOR which is O(1) and idempotent.
-        //
-        // Truthiness contract:
-        //   true  — daemon ACK'd with status=ok (registration confirmed in topology)
-        //   false — null/timeout response, non-ok status, or thrown exception
-        //
-        // Previously returned true on null/timeout ("idempotent, treat as success"),
-        // which silently persisted the gcore_topology_hash_<site> wp_option as
-        // proof of a registration the daemon never actually processed. The hash
-        // then looked authoritative on subsequent runs ("already registered, skip")
-        // while the topology entity was missing. Absence of ACK now fails closed.
         try {
-            $response = $this->sendCommand('registerService', [
-                'id' => $id,
-                'capabilities' => $numericCapabilities,
-                'metadata' => $metadata
-            ]);
+            $response = $this->sendCommand('registerService', $built['params']);
 
             if ($response && isset($response['status']) && $response['status'] === 'ok') {
                 $this->debug("Service '{$id}' registered successfully");
@@ -4771,39 +4113,25 @@ class gNodeClient implements gNodeClientInterface
     }
 
     /**
-     * Find services matching requirements
+     * Find services by capability words; an empty requirement lists every service.
      *
-     * @param array $requirements Array of requirements
-     * @return array Array of service IDs
+     * @param array $requirements Axis name => word | words | constraint, or {layer, facets, axes, limit}
+     * @return array Records with service_id, shape, environment, colour, metadata
      */
     public function findServices(array $requirements): array
     {
-        // Note: 'findServices' itself has no
-        // handler descriptor in the daemon catalog. The canonical capability-
-        // vector discovery command is 'geometric_discover' (geometric.rs,
-        // Lane::Concurrent — takes `capabilities: {dim: value}` and returns matching
-        // services). The wrapper translates its legacy `requirements` shape
-        // to the new `capabilities` field so callers don't need updating.
-        $response = $this->sendCommand('geometric_discover', [
-            'capabilities' => $requirements,
-        ]);
-
-        if ($response && isset($response['status']) && $response['status'] === 'ok') {
-            // geometric_discover returns {total_matches, results: [...]}.
-            // Legacy callers expected a flat array of service descriptors;
-            // unwrap to preserve that shape.
-            $result = $response['result'] ?? [];
-            if (isset($result['results']) && is_array($result['results'])) {
-                return $result['results'];
-            }
-            return is_array($result) ? $result : [];
+        if ($requirements === []) {
+            return $this->query(Query::build());
         }
-
-        if ($response && isset($response['status']) && $response['status'] === 'error') {
-            throw new gNodeException($response['error'] ?? 'Unknown error finding services');
+        if (isset($requirements['facets']) || isset($requirements['axes']) || isset($requirements['layer'])) {
+            return $this->query(Query::build(
+                (string) ($requirements['layer'] ?? '3'),
+                $requirements['facets'] ?? [],
+                $requirements['axes'] ?? [],
+                (int) ($requirements['limit'] ?? 10)
+            ));
         }
-
-        return [];
+        return $this->geometricDiscover($requirements);
     }
 
     /**
@@ -6514,595 +5842,58 @@ class gNodeClient implements gNodeClientInterface
     //=========================================================================
 
     /**
-     * The BUILT-IN capability vocabulary — a fallback, not the truth.
-     *
-     * Generated from the daemon's service_schema.yaml v4.0 (23 dimensions:
-     * 16 declared and hashed, 3 derived, 4 storage). It used to be frozen at
-     * a 23-dimension layout that disagreed with the daemon in six indices,
-     * which is how a range query on one axis came to constrain another.
-     *
-     * Prefer getPublishedCapabilitySchema(), which asks the daemon. This exists
-     * for the case where nothing is published yet — an old daemon, or a client
-     * that starts before the master does.
-     *
-     * A derived axis (writer: sampler) is written by the daemon's measurement,
-     * never by a registering provider: code 0.00 on one means UNKNOWN.
-     *
-     * @return array Dimension definitions with value mappings
-     */
-    public static function getBuiltinCapabilitySchema(): array
-    {
-        return [
-            'schema_version' => '4.0',
-            'total_dimensions' => 23,
-            'discovery_dimensions' => 19,
-            'hashed_dimensions' => 16,
-            'dimensions' => [
-                // declared, hashed
-                'protocol' => [
-                    'index' => 0,
-                    'query_type' => 'equality',
-                    'values' => [
-                        'undefined' => 0.00,
-                        'http_rest' => 0.10,
-                        'graphql' => 0.20,
-                        'grpc' => 0.30,
-                        'websocket' => 0.40,
-                        'gnode_stream' => 0.50,
-                        'resp3_direct' => 0.60,
-                        'amqp' => 0.70,
-                        'kafka' => 0.80,
-                        'custom_tcp' => 0.90,
-                    ],
-                ],
-                'api_version' => [
-                    'index' => 1,
-                    'query_type' => 'equality',
-                    'values' => [
-                        'undefined' => 0.00,
-                        'v1' => 0.10,
-                        'v2' => 0.20,
-                        'v3' => 0.30,
-                        'v4' => 0.40,
-                        'v5' => 0.50,
-                    ],
-                ],
-                'contract_stability' => [
-                    'index' => 2,
-                    'query_type' => 'range',
-                    'values' => [
-                        'experimental' => 0.00,
-                        'alpha' => 0.25,
-                        'beta' => 0.50,
-                        'stable' => 0.75,
-                        'frozen' => 1.00,
-                    ],
-                ],
-                'clearance_required' => [
-                    'index' => 3,
-                    'query_type' => 'range',
-                    'values' => [
-                        'public' => 0.00,
-                        'authenticated' => 0.20,
-                        'authorized' => 0.40,
-                        'privileged' => 0.60,
-                        'confidential' => 0.80,
-                        'classified' => 1.00,
-                    ],
-                ],
-                'auth_method' => [
-                    'index' => 4,
-                    'query_type' => 'equality',
-                    'values' => [
-                        'none' => 0.00,
-                        'api_key' => 0.20,
-                        'bearer_token' => 0.40,
-                        'session_cookie' => 0.60,
-                        'mtls' => 0.80,
-                        'hardware_token' => 1.00,
-                    ],
-                ],
-                'data_sensitivity' => [
-                    'index' => 5,
-                    'query_type' => 'range',
-                    'values' => [
-                        'public_data' => 0.00,
-                        'internal' => 0.25,
-                        'confidential' => 0.50,
-                        'pii' => 0.75,
-                        'regulated' => 1.00,
-                    ],
-                ],
-                'service_scope' => [
-                    'index' => 6,
-                    'query_type' => 'equality',
-                    'values' => [
-                        'infrastructure' => 0.00,
-                        'daemon' => 0.15,
-                        'worker' => 0.30,
-                        'cron_scheduled' => 0.45,
-                        'internal_api' => 0.60,
-                        'bff' => 0.75,
-                        'client_facing' => 0.90,
-                        'edge' => 1.00,
-                    ],
-                ],
-                'domain_primary' => [
-                    'index' => 7,
-                    'query_type' => 'proximity',
-                    'values' => [
-                        'undefined' => 0.00,
-                        'platform' => 0.05,
-                        'identity' => 0.10,
-                        'configuration' => 0.15,
-                        'storage' => 0.20,
-                        'cache' => 0.25,
-                        'compute' => 0.30,
-                        'transform' => 0.35,
-                        'messaging' => 0.40,
-                        'workflow' => 0.45,
-                        'template' => 0.50,
-                        'content' => 0.55,
-                        'gateway' => 0.60,
-                        'integration' => 0.65,
-                        'analytics' => 0.70,
-                        'logging' => 0.75,
-                        'ml_inference' => 0.80,
-                        'search' => 0.85,
-                        'notification' => 0.90,
-                        'presentation' => 0.95,
-                    ],
-                ],
-                'domain_secondary' => [
-                    'index' => 8,
-                    'query_type' => 'proximity',
-                    'values' => [
-                        'undefined' => 0.00,
-                        'platform' => 0.05,
-                        'identity' => 0.10,
-                        'configuration' => 0.15,
-                        'storage' => 0.20,
-                        'cache' => 0.25,
-                        'compute' => 0.30,
-                        'transform' => 0.35,
-                        'messaging' => 0.40,
-                        'workflow' => 0.45,
-                        'template' => 0.50,
-                        'content' => 0.55,
-                        'gateway' => 0.60,
-                        'integration' => 0.65,
-                        'analytics' => 0.70,
-                        'logging' => 0.75,
-                        'ml_inference' => 0.80,
-                        'search' => 0.85,
-                        'notification' => 0.90,
-                        'presentation' => 0.95,
-                    ],
-                ],
-                'specialization' => [
-                    'index' => 9,
-                    'query_type' => 'range',
-                    'values' => [
-                        'platform' => 0.00,
-                        'generalist' => 0.25,
-                        'focused' => 0.50,
-                        'specialist' => 0.75,
-                        'single_purpose' => 1.00,
-                    ],
-                ],
-                'throughput_tier' => [
-                    'index' => 10,
-                    'query_type' => 'range',
-                    'values' => [
-                        'minimal' => 0.00,
-                        'standard' => 0.25,
-                        'professional' => 0.50,
-                        'enterprise' => 0.75,
-                        'hyperscale' => 1.00,
-                    ],
-                ],
-                'latency_class' => [
-                    'index' => 11,
-                    'query_type' => 'range',
-                    'values' => [
-                        'realtime' => 0.00,
-                        'interactive' => 0.25,
-                        'responsive' => 0.50,
-                        'patient' => 0.75,
-                        'batch' => 1.00,
-                    ],
-                ],
-                'reliability_tier' => [
-                    'index' => 12,
-                    'query_type' => 'range',
-                    'values' => [
-                        'best_effort' => 0.00,
-                        'standard' => 0.25,
-                        'high' => 0.50,
-                        'critical' => 0.75,
-                        'ultra' => 1.00,
-                    ],
-                ],
-                'pipeline_stage' => [
-                    'index' => 13,
-                    'query_type' => 'equality',
-                    'values' => [
-                        'source' => 0.00,
-                        'ingest' => 0.20,
-                        'process' => 0.40,
-                        'enrich' => 0.60,
-                        'deliver' => 0.80,
-                        'sink' => 1.00,
-                    ],
-                ],
-                'execution_priority' => [
-                    'index' => 14,
-                    'query_type' => 'range',
-                    'values' => [
-                        'background' => 0.00,
-                        'low' => 0.25,
-                        'normal' => 0.50,
-                        'high' => 0.75,
-                        'critical' => 1.00,
-                    ],
-                ],
-                'environment' => [
-                    'index' => 15,
-                    'query_type' => 'equality',
-                    'values' => [
-                        'global' => 0.00,
-                        'testing' => 0.25,
-                        'staging' => 0.50,
-                        'acceptance' => 0.75,
-                        'production' => 1.00,
-                    ],
-                ],
-                // derived
-                'current_load' => [
-                    'index' => 16,
-                    'query_type' => 'range',
-                    'writer' => 'sampler',
-                    'values' => [
-                        'unknown' => 0.00,
-                        'idle' => 0.20,
-                        'light' => 0.40,
-                        'moderate' => 0.60,
-                        'heavy' => 0.80,
-                        'saturated' => 1.00,
-                    ],
-                ],
-                'health_status' => [
-                    'index' => 17,
-                    'query_type' => 'equality',
-                    'writer' => 'sampler',
-                    'values' => [
-                        'unknown' => 0.00,
-                        'dead' => 0.33,
-                        'degraded' => 0.67,
-                        'healthy' => 1.00,
-                    ],
-                ],
-                'lifecycle_state' => [
-                    'index' => 18,
-                    'query_type' => 'equality',
-                    'writer' => 'daemon',
-                    'values' => [
-                        'registering' => 0.00,
-                        'active' => 0.25,
-                        'draining' => 0.50,
-                        'stopped' => 0.75,
-                        'failed' => 1.00,
-                    ],
-                ],
-                // storage
-                'native_format' => [
-                    'index' => 19,
-                    'query_type' => 'informational',
-                    'values' => [
-                        'undefined' => 0.00,
-                        'plaintext' => 0.10,
-                        'json' => 0.20,
-                        'xml' => 0.30,
-                        'yaml' => 0.40,
-                        'msgpack' => 0.50,
-                        'protobuf' => 0.60,
-                        'cbor' => 0.70,
-                        'resp3' => 0.80,
-                        'custom_binary' => 0.90,
-                    ],
-                ],
-                'implementation_language' => [
-                    'index' => 20,
-                    'query_type' => 'informational',
-                    'values' => [
-                        'undefined' => 0.00,
-                        'rust' => 0.15,
-                        'php' => 0.30,
-                        'lua' => 0.45,
-                        'python' => 0.55,
-                        'go' => 0.65,
-                        'javascript' => 0.75,
-                        'bash' => 0.90,
-                    ],
-                ],
-                'data_persistence' => [
-                    'index' => 21,
-                    'query_type' => 'informational',
-                    'values' => [
-                        'stateless' => 0.00,
-                        'ephemeral' => 0.33,
-                        'persistent' => 0.67,
-                        'replicated' => 1.00,
-                    ],
-                ],
-                'service_tier' => [
-                    'index' => 22,
-                    'query_type' => 'informational',
-                    'values' => [
-                        'tool' => 0.10,
-                        'service' => 0.30,
-                        'pipeline' => 0.50,
-                        'infrastructure' => 0.70,
-                        'orchestrator' => 0.90,
-                    ],
-                ],
-            ],
-        ];
-    }
-
-    /**
-     * Auto-inject the service_tier and environment classification dimensions.
-     *
-     * Injected BY NAME, which is why this kept working while the index comments
-     * here rotted — they said 17 and 18; the daemon has had them at 19 and 20
-     * for a while. The daemon resolves names to indices itself, so no coordinate
-     * ever landed in the wrong slot through this path.
-     *
-     * The float vocabulary below is a third private copy of the daemon's, and it
-     * still agrees with service_schema.yaml value for value. Left inline
-     * deliberately: this runs before any schema fetch can be trusted, so it must
-     * work with no daemon reachable.
-     *
-     * @param array $capabilities Existing capability vector
-     * @param array $metadata Service metadata (may contain 'tier' and 'environment')
-     * @return array Updated capability vector with dims 17-18 injected + visual defaults
-     */
-    private function injectClassificationDimensions(array $capabilities, array $metadata): array
-    {
-        // Tier coordinates
-        static $tierCoordinates = [
-            'TOOL' => 0.10,
-            'SERVICE' => 0.30,
-            'PIPELINE' => 0.50,
-            'INFRASTRUCTURE' => 0.70,
-            'ORCHESTRATOR' => 0.90,
-            // Backward-compatible aliases
-            'FORUM' => 0.50,
-            'AQUEDUCT' => 0.70,
-            'ROME' => 0.90,
-        ];
-
-        // Environment coordinates
-        static $envCoordinates = [
-            'global' => 0.00,
-            'testing' => 0.25,
-            'staging' => 0.50,
-            'acceptance' => 0.75,
-            'production' => 1.00
-        ];
-
-        // Inject tier coordinate if metadata has tier
-        if (isset($metadata['tier'])) {
-            $tier = strtoupper($metadata['tier']);
-            $capabilities['service_tier'] = $tierCoordinates[$tier] ?? $tierCoordinates['SERVICE'];
-        } elseif (!isset($capabilities['service_tier'])) {
-            // Default to SERVICE tier if not specified
-            $capabilities['service_tier'] = $tierCoordinates['SERVICE'];
-        }
-
-        // Inject environment coordinate if metadata has environment
-        if (isset($metadata['environment'])) {
-            $env = strtolower($metadata['environment']);
-            $capabilities['environment'] = $envCoordinates[$env] ?? $envCoordinates['production'];
-        } elseif (!isset($capabilities['environment'])) {
-            // Default to production if not specified
-            $capabilities['environment'] = $envCoordinates['production'];
-        }
-
-        // Layer 9: Visual Topology defaults (dims 19-21)
-        // Center position (0.5) as default - user can override
-        if (!isset($capabilities['user_x'])) {
-            $capabilities['user_x'] = 0.50;
-        }
-        if (!isset($capabilities['user_y'])) {
-            $capabilities['user_y'] = 0.50;
-        }
-        if (!isset($capabilities['user_z'])) {
-            $capabilities['user_z'] = 0.50;
-        }
-
-        // Layer 10: registration_order (dim 22) is auto-injected by Lua
-        // Do NOT set it here - Lua's GNODE_REGISTER_CAPABILITY_VECTOR handles it atomically
-
-        return $capabilities;
-    }
-
-    /**
-     * Translate human-readable capability names to geometric coordinates
-     *
-     * Width comes from the schema, not from a literal. It was 23 here while the
-     * daemon's service tier was 30, so five dimensions had nowhere to land.
-     *
-     * @param array $capabilities Associative array of dimension_name => value_name
-     * @return array Float coordinates (0.0-1.0), one per dimension of the tier
-     */
-    public function translateCapabilitiesToCoordinates(array $capabilities): array
-    {
-        $schema = $this->resolveCapabilitySchema();
-        $width = (int) ($schema['total_dimensions'] ?? count($schema['dimensions'] ?? []));
-        $coordinates = array_fill(0, max($width, 1), 0.0);
-
-        foreach ($capabilities as $dimensionName => $valueName) {
-            if (!isset($schema['dimensions'][$dimensionName])) {
-                throw new \InvalidArgumentException("Unknown dimension: {$dimensionName}");
-            }
-
-            $dimension = $schema['dimensions'][$dimensionName];
-            $index = $dimension['index'];
-
-            // Handle numeric values directly
-            if (is_numeric($valueName)) {
-                $coordinates[$index] = (float)$valueName;
-                continue;
-            }
-
-            // domain_secondary shares values with domain_primary
-            $values = $dimension['values'];
-            if ($values === 'same as domain_primary') {
-                $values = $schema['dimensions']['domain_primary']['values'];
-            }
-
-            if (!isset($values[$valueName])) {
-                $validValues = implode(', ', array_keys($values));
-                throw new \InvalidArgumentException(
-                    "Invalid value '{$valueName}' for dimension '{$dimensionName}'. Valid values: {$validValues}"
-                );
-            }
-
-            $coordinates[$index] = $values[$valueName];
-        }
-
-        return $coordinates;
-    }
-
-    /**
-     * Translate geometric coordinates back to human-readable capability names
-     *
-     * @param array $coordinates Float coordinates, one per dimension of the tier
-     * @return array Associative array of dimension_name => value_name (closest match)
-     */
-    public function translateCoordinatesToHuman(array $coordinates): array
-    {
-        $schema = $this->resolveCapabilitySchema();
-        $result = [];
-
-        foreach ($schema['dimensions'] as $dimensionName => $dimension) {
-            $index = $dimension['index'];
-            $coordinate = $coordinates[$index] ?? 0.0;
-
-            // Handle domain_secondary's shared values
-            $values = $dimension['values'];
-            if ($values === 'same as domain_primary') {
-                $values = $schema['dimensions']['domain_primary']['values'];
-            }
-
-            // Find the closest matching value
-            $closestName = 'undefined';
-            $closestDistance = PHP_FLOAT_MAX;
-
-            foreach ($values as $name => $value) {
-                $distance = abs($value - $coordinate);
-                if ($distance < $closestDistance) {
-                    $closestDistance = $distance;
-                    $closestName = $name;
-                }
-            }
-
-            $result[$dimensionName] = [
-                'value' => $closestName,
-                'coordinate' => $coordinate,
-                'exact_match' => $closestDistance < 0.001,
-            ];
-        }
-
-        return $result;
-    }
-
-    /**
-     * Get human-readable description of a service's capabilities
-     *
-     * Fetches a service from the topology and returns its capabilities
-     * in human-readable format.
+     * A service's declaration as the one topology holds it: shape, environment, colour
+     * (axis → words), metadata, and the derived load and health from the header slots.
      *
      * @param string $serviceId Service identifier
-     * @return array|null Human-readable capabilities or null if not found
+     * @return array|null Declaration, or null when the entity is unknown
      */
     public function getServiceCapabilities(string $serviceId): ?array
     {
-        $topology = $this->getTopology();
-
-        if (!isset($topology['services'][$serviceId])) {
+        try {
+            $raw = $this->storage->hGet("{{$this->topologyNamespace}}:gnode:constellation:entities", $serviceId);
+        } catch (\Throwable $e) {
+            $this->debug("entity read failed for {$serviceId}: {$e->getMessage()}");
             return null;
         }
-
-        $service = $topology['services'][$serviceId];
-        $coordinates = $service['point'] ?? [];
-
-        if (empty($coordinates)) {
+        if (!is_string($raw) || $raw === '') {
             return null;
         }
-
+        $rec = $this->safeJsonDecode($raw, true);
+        if (!is_array($rec)) {
+            return null;
+        }
+        $pd = $rec['pd'] ?? [];
         return [
             'service_id' => $serviceId,
-            'capabilities' => $this->translateCoordinatesToHuman($coordinates),
-            'metadata' => $service['metadata'] ?? [],
-            'registered_at' => $service['registered_at'] ?? null,
+            'shape' => $rec['sh'] ?? null,
+            'environment' => $rec['env'] ?? null,
+            'capabilities' => $rec['c'] ?? [],
+            'metadata' => $rec['m'] ?? [],
+            'load' => isset($pd[16]) ? (float) $pd[16] : (isset($pd['16']) ? (float) $pd['16'] : null),
+            'health' => isset($pd[17]) ? (float) $pd[17] : (isset($pd['17']) ? (float) $pd['17'] : null),
+            'registered_at' => $rec['ro'] ?? null,
         ];
     }
 
     /**
-     * Discover services using human-readable capability requirements
+     * Discover services by the words of their declaration.
      *
      * Example:
      *   $services = $client->discoverByCapabilities([
      *       'protocol' => 'http_rest',
-     *       'domain_primary' => 'compute',
-     *       'latency_class' => ['max' => 'responsive'],  // Use constraint
+     *       'domain' => 'compute',
+     *       'latency_class' => ['max' => 'responsive'],
      *   ]);
      *
-     * @param array $requirements Human-readable requirements
+     * @param array $requirements Axis name => word | words | constraint
      * @param int $limit Maximum services to return
-     * @return array Array of matching services with human-readable capabilities
+     * @param string $layer Shape word or layer key; default every service
+     * @return array Records with service_id, shape, environment, colour, metadata
      */
-    public function discoverByCapabilities(array $requirements, int $limit = 10): array
+    public function discoverByCapabilities(array $requirements, int $limit = 10, string $layer = '3'): array
     {
-        // Translate requirements to coordinates for geometric discovery
-        $coordinates = [];
-        foreach ($requirements as $dimension => $value) {
-            // Handle constraint syntax (e.g., ['max' => 'responsive'])
-            if (is_array($value)) {
-                // Complex constraint - will be handled by discoverRange
-                continue;
-            }
-            // One lookup, used for both sides. Reading $coords at a different
-            // index than the one written to would pick up a neighbouring
-            // dimension's value, so these must not be resolved independently.
-            $idx = $this->getDimensionIndex($dimension);
-            $coords = $this->translateCapabilitiesToCoordinates([$dimension => $value]);
-            $coordinates[$idx] = $coords[$idx] ?? 0.0;
-        }
-
-        // Use geometric discovery
-        // Discovery width from the schema. The literal 17 here matched neither
-        // the old 19 discovery dimensions nor the current 25 — it was a third
-        // number, agreeing with nothing.
-        $services = $this->geometricDiscover($coordinates, $limit, $this->capabilityDiscoveryWidth(), 0);
-
-        // Enrich results with human-readable capabilities
-        $enriched = [];
-        foreach ($services as $service) {
-            $serviceId = $service['id'] ?? $service['service_id'] ?? null;
-            if ($serviceId) {
-                $capabilities = $this->getServiceCapabilities($serviceId);
-                if ($capabilities) {
-                    $enriched[] = $capabilities;
-                } else {
-                    $enriched[] = $service;
-                }
-            }
-        }
-
-        return $enriched;
+        return $this->geometricDiscover($requirements, $limit, $layer);
     }
 
     //=========================================================================
@@ -7428,9 +6219,6 @@ class gNodeClient implements gNodeClientInterface
      * of putting a Pro function name on the wire from a base install.
      */
     protected const PREMIUM_FCALL_PREFIXES = [
-        'GNODE_DEP_'        => ['gNode-TOPO', 'multi_topology'],
-        'GNODE_REGISTRY_'   => ['gNode-TOPO', 'multi_topology'],
-        'GNODE_CROSS_'      => ['gNode-TOPO', 'multi_topology'],
         'GNODE_FEATURE_'    => ['gNode-OBSERVE', 'observability'],
         'GNODE_EXPERIMENT_' => ['gNode-OBSERVE', 'observability'],
         'GNODE_SESSION_'    => ['gNode-OBSERVE', 'observability'],

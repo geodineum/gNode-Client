@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.2.0 — unreleased (one topology)
+
+Pre-release clean break: the client declares by name and the daemon codes. Wire shapes
+of `registerService` and `geometric_discover` changed with gNode's one topology
+(`SPEC-ONE-TOPOLOGY.md`); a daemon on the old tier schema will refuse these.
+
+### Added
+- `Topology\Declaration` — shape words → shape keys, legacy axis map → `{id, shape, environment, axes, metadata, on, capacity_weight, heartbeat, holds, requires, peers, constellation}`; numbers refused before the wire.
+- `Topology\Query` — `{layer, facets, axes, limit}` from legacy requirement shapes; `relayTarget()` for `_rt`.
+- `gNodeClient::query(array)` — one `geometric_discover`, results carry `service_id, shape, environment, colour, metadata`.
+
+### Changed
+- `registerService()` sends the declaration by name; registration facts (`shape`, `on`, `capacity_weight`, `heartbeat`, `holds`, `requires`, `peers`, `constellation`) may ride in `$metadata` and are lifted out.
+- `geometricDiscover()`, `findServices()`, `discoverByCapabilities()`, `discoverRange()` take words, lists and `[lo, hi]` ranges; `discoverRange()` answers service ids; all gain a `$layer` argument.
+- `sendCommandToCapable()` puts the query in `_rt`; the daemon picks service and placement once per relay. `candidate` and `exclude_self` options are gone.
+- `getPublishedCapabilitySchema($shape)`, `capabilityDimensionCount($shape)` (24), `capabilityDiscoveryWidth($shape)` (provider-written slots), `getCapabilityDimensions($shape)` read the per-shape schema at `{ns}:gnode:constellation:schema:<shape>`.
+- `getServiceCapabilities()` reads the entity record (`HGET …:constellation:entities`) and answers colour words plus derived load and health.
+
+### Removed
+- `geometricStoreTopology()`, `translateCapabilitiesToCoordinates()`, `translateCoordinatesToHuman()`, `getBuiltinCapabilitySchema()`, the built-in dimension tables and `getDimensionIndex()`/`normalizeConstraint()`.
+- `dep*`, `registry*`, `cross*` wrappers and their interface declarations; `GNODE_DEP_*`/`GNODE_REGISTRY_*`/`GNODE_CROSS_*` leave the premium prefix map (retired with the custom-topology engine).
+- `gNodeConfig::getTopologyKey()` (no callers; the one topology key is the daemon's).
+
+
 ## 0.1.2 — unreleased
 
 ### Fixed
