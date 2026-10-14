@@ -7,7 +7,7 @@ use gCore\gNode\gNodeClient;
 use gCore\gNode\Storage\StorageInterface;
 use PHPUnit\Framework\TestCase;
 
-/** getTopology() is one read of the constellation's entities, grouped by layer and decoded by shape. */
+/** getTopology() is one plain HGETALL of the constellation's entities (a site holds %R~ on the key, which FCALL refuses), grouped by layer and decoded by shape. */
 final class TopologyReadTest extends TestCase
 {
     public function testEntitiesAreGroupedByLayerAndDecoded(): void
@@ -25,16 +25,25 @@ final class TopologyReadTest extends TestCase
         $storage = $this->createMock(StorageInterface::class);
         $storage->method('isConnected')->willReturn(true);
         $storage->method('ping')->willReturn(true);
+        $assoc = [];
+        for ($i = 0; $i < count($entities); $i += 2) {
+            $assoc[$entities[$i]] = $entities[$i + 1];
+        }
         $asked = [];
-        $storage->method('fcall')->willReturnCallback(function (string $fn, array $keys, array $args) use (&$asked, $entities) {
-            $asked[] = [$fn, $keys];
-            return $entities;
+        $storage->method('hGetAll')->willReturnCallback(function (string $key) use (&$asked, $assoc) {
+            $asked[] = $key;
+            return $assoc;
+        });
+        $fcalls = [];
+        $storage->method('fcall')->willReturnCallback(function (string $fn) use (&$fcalls) {
+            $fcalls[] = $fn;
+            return null;
         });
         $c = new gNodeClient($storage, 'nierto_com', 'test-node', ['use_fallback' => false]);
 
         $t = $c->getTopology();
-        $reads = array_values(array_filter($asked, fn ($a) => $a[0] === 'GNODE_HASH_HGETALL'));
-        self::assertSame([['GNODE_HASH_HGETALL', ['{geodineum}:gnode:constellation:entities']]], $reads, 'one key, one read');
+        self::assertSame(['{geodineum}:gnode:constellation:entities'], $asked, 'one key, one read');
+        self::assertNotContains('GNODE_HASH_HGETALL', $fcalls, 'never through a writing FCALL');
         self::assertSame(['nierto_com', 'gflow'], array_keys($t['services']));
         self::assertSame(['gCore'], array_keys($t['components']));
         self::assertSame(['aesir-solutions'], array_keys($t['nodes']));

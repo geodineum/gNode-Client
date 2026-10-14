@@ -1826,7 +1826,7 @@ class gNodeClient implements gNodeClientInterface
 
         $out = ['services' => [], 'nodes' => [], 'components' => [], 'placements' => []];
         try {
-            $entries = $this->luaHGetAll("{{$this->topologyNamespace}}:gnode:constellation:entities");
+            $entries = $this->storage->hGetAll("{{$this->topologyNamespace}}:gnode:constellation:entities");
             foreach ($entries as $id => $json) {
                 $rec = is_array($json) ? $json : ($this->safeJsonDecode($json, true) ?? null);
                 if (!is_array($rec)) {
