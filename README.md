@@ -34,7 +34,7 @@ The complete method index - every signature with a one-line summary - is **gener
 - **Comms queueing** - `queueCommsMessage` / `queueContactForm` XADD to `{siteId}:gnode:comms:{env}` in exactly the shape Geodineum-COMMS reads, stamping the top-level `environment` that gates non-production sends.
 - **Health streaming** - `HealthStreamWriter::publishMetrics` writes compressed metrics; `HealthMetrics` is the value object.
 - **Broadcast** - `BroadcastReader` reads and writes the global one-to-many announcement stream.
-- **Geometric discovery** - `geometricDiscover` and capability-vector helpers resolve services by capability, not by name.
+- **Discovery on the one topology** - `registerService` declares an entity by name and `query` finds entities by layer, facet and axis range; the daemon codes every coordinate.
 - **Stream wiring** - `forSite`, `ensureConsumerGroups`, `getStreamStatus`, and the `get*Stream` accessors set up and inspect the daemon streams.
 
 ## Contract

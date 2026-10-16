@@ -91,11 +91,9 @@ constructs it (all in `src/gNodeClient.php`). Parameter and return semantics:
 
 | Command (wire) | Client method | Source |
 |---|---|---|
-| `geometric_store_topology` | `geometricStoreTopology(array $topology, int $dimensions=8): bool` | `:1717` |
-| `geometric_discover` | `geometricDiscover(array $capabilities, int $limit=10, float $threshold=0.0): array` (axis => value; list of `{service_id, distance}`); also `findServices(array $requirements): array` | `:1787`, `:4763` |
+| `geometric_discover` | `geometricDiscover(array $capabilities, int $limit=10, float $threshold=0.0): array` (legacy entry point routed through `Topology\Query::fromLegacy` to `{layer, facets, axes, limit}`; list of `{service_id, ...}`; `query(array $q)` is the direct form); also `findServices(array $requirements): array` | `:1787`, `:4763` |
 | `geometric_discover_range` | `discoverRange(array $criteria): array` (service ids) | `:1816` |
 | `geometric_dimensions` | `getCapabilityDimensions(): array` | `:1848` |
-| `geometric_distance` | `geometricDistance(array $point1, array $point2): array` | `:4848` |
 | `geometric_load_sequence` | `getLoadSequence(string $group='default'): array` | `:4450` |
 | `registerService` | `registerService(string $id, array $capabilities, array $metadata=[]): bool` | `:4282` |
 | `deregisterService` | `deregisterService(string $serviceId): bool` | `:4354` |
@@ -117,7 +115,7 @@ constructs it (all in `src/gNodeClient.php`). Parameter and return semantics:
 generic passthrough for any command name.
 
 Everything else on the public surface is an FCALL wrapper, not a stream command —
-`GNODE_CACHE_*`, `GNODE_HASH_*`, `GNODE_DEP_*`, `GNODE_REGISTRY_*`, and the rest of the
+`GNODE_CACHE_*`, `GNODE_HASH_*`, and the rest of the
 allowlisted `^(GNODE|GCUBE|COMMS|GC)_[A-Z0-9_]+$` surface. See `CONTRACT.md`.
 
 ## Implementation Notes

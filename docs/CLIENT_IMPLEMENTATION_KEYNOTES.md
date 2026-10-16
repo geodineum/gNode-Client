@@ -44,7 +44,7 @@ Commands travel as XADD fields with canonical short names and **full command nam
   "t": "c",                        // Type: command
   "id": "example.com:6864...",     // Request id (uniqid, site-prefixed)
   "c": "geometric_discover",       // Full command name (no abbreviation on the wire)
-  "p": "{\"capabilities\":[...],\"_request_id\":\"...\"}", // JSON-encoded params
+  "p": "{\"layer\":\"3\",\"facets\":{...},\"_request_id\":\"...\"}", // JSON-encoded params
   "ss": "example.com",             // Source site
   "sn": "client",                  // Source node
   "ts": "1751500000000.123"        // Unix timestamp, MILLISECONDS
@@ -96,11 +96,7 @@ via `FCALL GNODE_CACHE_GET` with exponential backoff (`src/gNodeClient.php:3466+
 - `version` - Version information
 
 ### Geometric Commands
-- `geometric_discover` - Find services by capabilities
-- `geometric_store_topology` - Store topology information
-- `geometric_load_sequence` - Optimal service load ordering
-- `geometric_distance` - Calculate distance between points
-- `geometric_dimensions` - Get capability dimensions
+- `geometric_discover` - Find entities of a layer by facets and axis ranges
 
 ### Stream Commands
 - `stream_info` - Stream information
@@ -113,8 +109,8 @@ via `FCALL GNODE_CACHE_GET` with exponential backoff (`src/gNodeClient.php:3466+
 - `get_site_info`/`site_info` - Site information
 
 ### Client-level Commands
-- `registerService` - Register service with capabilities
-- `findServices` - Discover services by capability
+- `registerService` - Declare an entity by name (shape, axes as words)
+- `findServices` - Discover services (legacy entry point over `query`)
 - `getServiceDetails` - Service information
 - `getLoadSequence` - Optimal loading sequence
 
@@ -141,7 +137,7 @@ via `FCALL GNODE_CACHE_GET` with exponential backoff (`src/gNodeClient.php:3466+
 - **SOLID Architecture**: Single responsibility, open/closed, etc.
 - **Resilient Design**: Graceful degradation under failure
 - **Performance by Design**: Architectural choices optimize for throughput
-- **Geometric Abstraction**: Represent capabilities as n-dimensional points
+- **One topology**: declare by name; the daemon encodes, the client never codes a coordinate
 
 ## Implementation Checklist
 
@@ -164,8 +160,8 @@ via `FCALL GNODE_CACHE_GET` with exponential backoff (`src/gNodeClient.php:3466+
 
 ---
 
-**SPR Tags**: #service-discovery #capability-space #geometric-topology #n-dimensional #valkey-functions #stream-processing #modular-architecture #resilient-design #valkey-streams
+**SPR Tags**: #service-discovery #one-topology #valkey-functions #stream-processing #modular-architecture #resilient-design #valkey-streams
 
-**SPR Vectors**: [service_mesh, 0.87], [distributed_systems, 0.92], [microservices, 0.78], [capability_mapping, 0.95], [topology_management, 0.89]
+**SPR Vectors**: [service_mesh, 0.87], [distributed_systems, 0.92], [microservices, 0.78], [declaration_by_name, 0.95], [topology_management, 0.89]
 
-**SPR Prompt**: Consider service capability as coordinates in n-dimensional space for O(1) discovery.
+**SPR Prompt**: Declare a service by name on the constellation's one topology; find it by facet and axis range.
