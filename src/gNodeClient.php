@@ -4072,7 +4072,6 @@ class gNodeClient implements gNodeClientInterface
         return $out;
     }
 
-
     /**
      * Register a service on the one topology by the words of its declaration.
      *
@@ -4873,17 +4872,6 @@ class gNodeClient implements gNodeClientInterface
     }
 
     /**
-     * List all registered templates
-     *
-     * @param array $config List configuration
-     * @return array Template identifiers
-     */
-    public function listTemplates(array $config = []): array
-    {
-        return $this->getTemplateManager()->listTemplates($config);
-    }
-
-    /**
      * Get template metadata
      *
      * @param string $templateId Template identifier
@@ -4919,30 +4907,6 @@ class gNodeClient implements gNodeClientInterface
     }
 
     /**
-     * Discover similar templates via geometric search
-     *
-     * @param string $templateId Reference template ID
-     * @param int $limit Maximum results
-     * @return array Matching templates
-     */
-    public function discoverSimilarTemplates(string $templateId, int $limit = 10): array
-    {
-        return $this->getTemplateManager()->discoverSimilarTemplates($templateId, $limit);
-    }
-
-    /**
-     * Discover templates by capability constraints
-     *
-     * @param array $capabilities 8D capability constraints
-     * @param int $limit Maximum results
-     * @return array Matching templates
-     */
-    public function discoverTemplatesByCapability(array $capabilities, int $limit = 100): array
-    {
-        return $this->getTemplateManager()->discoverTemplatesByCapability($capabilities, $limit);
-    }
-
-    /**
      * Render template string without registration
      *
      * @param string $template Template content
@@ -4953,17 +4917,6 @@ class gNodeClient implements gNodeClientInterface
     public function renderTemplateString(string $template, array $variables = [], array $config = []): string
     {
         return $this->getTemplateManager()->renderString($template, $variables, $config);
-    }
-
-    /**
-     * Get all template metadata
-     *
-     * @param array $config Configuration
-     * @return array All template metadata
-     */
-    public function getAllTemplateMetadata(array $config = []): array
-    {
-        return $this->getTemplateManager()->getAllTemplateMetadata($config);
     }
 
     /**

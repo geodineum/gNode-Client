@@ -282,40 +282,6 @@ class TemplateManager
     }
 
     /**
-     * List all registered templates
-     *
-     * @param array<string, mixed> $config List configuration
-     * @return array<int, string> Array of template identifiers
-     * @throws gNodeException On retrieval failure
-     */
-    public function listTemplates(array $config = []): array
-    {
-        try {
-            $response = $this->client->executeCommand('list_templates', [
-                'config' => $config
-            ]);
-
-            // Parse batched response format
-            if (isset($response['messages']) && !empty($response['messages'])) {
-                $message = $response['messages'][0];
-                if (isset($message[2])) {
-                    $result = json_decode($message[2], true);
-                    return $result['templates'] ?? [];
-                }
-            }
-
-            return $response['templates'] ?? [];
-        } catch (\Exception $e) {
-            $this->stats['errors']++;
-            throw new gNodeException(
-                'Failed to list templates: ' . $e->getMessage(),
-                0,
-                $e
-            );
-        }
-    }
-
-    /**
      * Get template capabilities (8D geometric vector and metadata)
      *
      * Uses get_template_capabilities daemon command to retrieve the template's
@@ -388,66 +354,6 @@ class TemplateManager
     }
 
     /**
-     * Discover templates similar to a reference template using geometric search
-     *
-     * Uses daemon's discover_similar_templates command which finds templates
-     * similar to a reference template using 8D Euclidean distance.
-     *
-     * @param string $templateId Reference template ID
-     * @param int $limit Maximum results
-     * @return array<int, array<string, mixed>> Array of matching template IDs with distances
-     * @throws gNodeException On discovery failure
-     */
-    public function discoverSimilarTemplates(string $templateId, int $limit = 10): array
-    {
-        try {
-            $response = $this->client->executeCommand('discover_similar_templates', [
-                'template_id' => $templateId,
-                'limit' => $limit
-            ]);
-
-            return $response['similar_templates'] ?? [];
-        } catch (\Exception $e) {
-            $this->stats['errors']++;
-            throw new gNodeException(
-                'Failed to discover similar templates: ' . $e->getMessage(),
-                0,
-                $e
-            );
-        }
-    }
-
-    /**
-     * Discover templates by capability constraints
-     *
-     * Uses daemon's discover_templates_by_capability command which filters
-     * templates by capability constraints in 8D space.
-     *
-     * @param array<string, float> $capabilities Capability constraints (8D vector or subset)
-     * @param int $limit Maximum results
-     * @return array<int, array<string, mixed>> Array of matching templates
-     * @throws gNodeException On discovery failure
-     */
-    public function discoverTemplatesByCapability(array $capabilities, int $limit = 100): array
-    {
-        try {
-            $response = $this->client->executeCommand('discover_templates_by_capability', [
-                'capabilities' => $capabilities,
-                'limit' => $limit
-            ]);
-
-            return $response['templates'] ?? [];
-        } catch (\Exception $e) {
-            $this->stats['errors']++;
-            throw new gNodeException(
-                'Failed to discover templates by capability: ' . $e->getMessage(),
-                0,
-                $e
-            );
-        }
-    }
-
-    /**
      * Render a template string without registration (one-off rendering)
      *
      * Note: The daemon does not provide a render_string command.
@@ -464,47 +370,6 @@ class TemplateManager
         throw new gNodeException(
             "render_string command not available in daemon. Use registerTemplate() with short TTL instead."
         );
-    }
-
-    /**
-     * Get metadata for all registered templates
-     *
-     * Note: The daemon provides list_templates which returns template IDs.
-     * To get full metadata, call getTemplateMetadata() for each template.
-     *
-     * @param array<string, mixed> $config Configuration
-     * @return array<string, array<string, mixed>> Array of template metadata indexed by template ID
-     * @throws gNodeException On retrieval failure
-     */
-    public function getAllTemplateMetadata(array $config = []): array
-    {
-        try {
-            // Get list of all templates
-            $templateIds = $this->listTemplates($config);
-
-            // Get metadata for each template
-            $allMetadata = [];
-            foreach ($templateIds as $templateId) {
-                try {
-                    $metadata = $this->getTemplateMetadata($templateId);
-                    if ($metadata !== null) {
-                        $allMetadata[$templateId] = $metadata;
-                    }
-                } catch (\Exception $e) {
-                    // Skip templates that can't be retrieved
-                    $this->debug("Failed to get metadata for template '{$templateId}': " . $e->getMessage());
-                }
-            }
-
-            return $allMetadata;
-        } catch (\Exception $e) {
-            $this->stats['errors']++;
-            throw new gNodeException(
-                'Failed to get all template metadata: ' . $e->getMessage(),
-                0,
-                $e
-            );
-        }
     }
 
     /**
