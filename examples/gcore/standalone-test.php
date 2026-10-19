@@ -25,7 +25,7 @@ echo "=== gNode-Client Auto-Batching Standalone Test ===\n\n";
 $password = \gCore\gNode\Config\CredentialResolver::tryResolve('gnode_client');
 
 if (!$password) {
-    die("ERROR: ValKey password not found. Check /etc/geodineum/credentials/ or run register-site.sh\n");
+    die("ERROR: ValKey password not found. Check /etc/geodineum/credentials/ or register the service: sudo geodineum register\n");
 }
 
 echo "1. Initializing gNode Client with auto-batching enabled...\n";
