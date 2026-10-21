@@ -957,9 +957,11 @@ class gNodeClient implements gNodeClientInterface
         // unwrapped GNODE_* helpers + anything else an adversary can
         // cause to be registered). Gate on the canonical naming
         // convention before touching the wire.
-        if (!preg_match('/\A(?:GNODE|GCUBE|COMMS|GC)_[A-Z0-9_]+\z/', $function)) {
+        // GCORE_MGR_CONFIG_* / GCORE_MGR_SECRETS_* are gCore managers' per-site config
+        // (gNode functions/gnode_gcore_config.lua); nothing else under GCORE_ passes.
+        if (!preg_match('/\A(?:GNODE|GCUBE|COMMS|GC|GCORE_MGR_(?:CONFIG|SECRETS))_[A-Z0-9_]+\z/', $function)) {
             throw new \InvalidArgumentException(
-                "fcall: function name {$function} does not match the canonical ^(GNODE|GCUBE|COMMS|GC)_[A-Z0-9_]+$ allowlist (NC-D2.07)"
+                "fcall: function name {$function} does not match the canonical ^(GNODE|GCUBE|COMMS|GC|GCORE_MGR_(CONFIG|SECRETS))_[A-Z0-9_]+$ allowlist"
             );
         }
 

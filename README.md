@@ -30,7 +30,7 @@ The complete method index - every signature with a one-line summary - is **gener
 
 ## Capabilities
 
-- **FCALL cache & Lua ops** - `luaGet`/`luaSet`/`luaDel`/`luaIncrBy`/`luaHSet`… and a generic `fcall()` gated to the allowlist `^(GNODE|GCUBE|COMMS|GC)_[A-Z0-9_]+$` (rejected before any wire I/O).
+- **FCALL cache & Lua ops** - `luaGet`/`luaSet`/`luaDel`/`luaIncrBy`/`luaHSet`… and a generic `fcall()` gated to the allowlist `^(GNODE|GCUBE|COMMS|GC|GCORE_MGR_(CONFIG|SECRETS))_[A-Z0-9_]+$` (rejected before any wire I/O).
 - **Comms queueing** - `queueCommsMessage` / `queueContactForm` XADD to `{siteId}:gnode:comms:{env}` in exactly the shape Geodineum-COMMS reads, stamping the top-level `environment` that gates non-production sends.
 - **Health streaming** - `HealthStreamWriter::publishMetrics` writes compressed metrics; `HealthMetrics` is the value object.
 - **Broadcast** - `BroadcastReader` reads and writes the global one-to-many announcement stream.

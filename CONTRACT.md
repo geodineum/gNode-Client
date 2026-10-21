@@ -26,7 +26,7 @@ Interfaces other components may rely on. Signatures and stream-key formats are e
 
 | Method | Signature | Source |
 |---|---|---|
-| `fcall` | `fcall(string $function, array $keys, array $args): mixed` — enforces allowlist `^(GNODE\|GCUBE\|COMMS\|GC)_[A-Z0-9_]+$` | `src/gNodeClient.php` |
+| `fcall` | `fcall(string $function, array $keys, array $args): mixed` — enforces allowlist `^(GNODE\|GCUBE\|COMMS\|GC\|GCORE_MGR_(CONFIG\|SECRETS))_[A-Z0-9_]+$` | `src/gNodeClient.php` |
 | `ValKeyStorage::fcall` | `fcall(string $function, array $keys, array $args): mixed` — RESP3 `rawCommand FCALL [function] [numkeys] [keys...] [args...]` | `src/Storage/ValKeyStorage.php` |
 | `ValKeyStorage::xAdd` | `xAdd(string $key, string $id, array $fields): string` (RESP3 XADD) | `src/Storage/ValKeyStorage.php` |
 
@@ -154,7 +154,7 @@ What this library needs, and from which component.
 | RESP3 FCALL | `FCALL [function:string] [numkeys:int] [keys...] [args:scalar_or_json]` | ValKey daemon, port **47445** | `src/Storage/ValKeyStorage.php`; `README.md` |
 | RESP3 XADD | `XADD [key] [id (*=autogen)] [field value]...` → `[message_id]` | ValKey daemon, port 47445 | `src/Storage/ValKeyStorage.php`; `src/gNodeClient.php` |
 | Credentials (password) | Plain-text 64-char hex; file chain `env VALKEY_PASSWORD_FILE` → `/etc/geodineum/credentials/{site}.password` → legacy | Geodineum installer + filesystem | `src/Config/CredentialResolver.php` (5-level chain); `CLAUDE.md` |
-| Lua functions in ValKey | `FUNCTION LOAD`; names `GNODE_* \| GCUBE_* \| COMMS_* \| GC_*`; invoked via FCALL | gNode daemon (function registration) | `README.md`; `src/gNodeClient.php` |
+| Lua functions in ValKey | `FUNCTION LOAD`; names `GNODE_* \| GCUBE_* \| COMMS_* \| GC_* \| GCORE_MGR_CONFIG_* \| GCORE_MGR_SECRETS_*`; invoked via FCALL | gNode daemon (function registration) | `README.md`; `src/gNodeClient.php` |
 | Stream `{siteId}:gnode:unified:{environment}` | RESP3 stream; consumer groups `gnode-daemon`, `gnode-client`; hash-tagged key | gNode daemon (reader) | `src/gNodeClient.php`; `src/ConsumerGroupHandler.php` |
 | Stream `{siteId}:gnode:health:{environment}` | RESP3 stream; consumer group `gnode-daemon`; compressed schema | gNode daemon (reader) | `src/Health/HealthStreamWriter.php`; `src/Health/HealthMetrics.php` |
 | Stream `{siteId}:gnode:broadcast:global` | RESP3 stream; **no consumer groups**; readers track own position | gNode daemon (writer); PHP clients (readers) | `src/gNodeClient.php`; `src/Broadcast/BroadcastReader.php` |
@@ -292,7 +292,7 @@ Cross-component status (from ecosystem cross-check). Items below either involve 
 - **ADHERES — comms wire shape.** `queueCommsMessage`/`queueContactForm` (`src/gNodeClient.php`) emit exactly the fields gNode-COMMS `parse_message` reads (`stream_reader.rs`): brace-literal `{site_id}:gnode:comms:{env}` key, scalar `id/type/timestamp/site_id/environment/priority`, JSON `sender/content/metadata/dispatch`. Field-by-field match.
 - **ADHERES — environment authority.** Top-level scalar `environment` is read directly by COMMS as authoritative (`stream_reader.rs`). The field is **double-stamped** (also nested in `metadata.environment`); this is harmless **only because** COMMS reads the top-level flat field. Any consumer that reads `metadata.environment` instead would let non-prod messages on a prod stream bypass gating.
 - **ADHERES — unified command fields.** Client writes canonical-compact `t/c/p/id/ss/sn/ts`, matching the daemon's `field_names` resolver (`utils.rs`); no legacy `st/n` aliases emitted. The client never emits `ds`/`dn` (dest addressing); those aliases exist daemon-side only.
-- **ADHERES — FCALL allowlist.** Client regex `^(GNODE|GCUBE|COMMS|GC)_` is a correct superset of all registered `GNODE_*` Lua functions.
+- **ADHERES — FCALL allowlist.** Client regex `^(GNODE|GCUBE|COMMS|GC|GCORE_MGR_(CONFIG|SECRETS))_` is a correct superset of all registered `GNODE_*` Lua functions and admits the gCore managers' per-site config functions (`gnode_gcore_config.lua`).
 - **RESOLVED — message-type enum drift.** This client's docblock now matches the wire convention `contact | alert | error | test | system` (`src/gNodeClient.php`); the earlier `contact-form` entry is gone. `parse_message` still does not validate `type` against an enum, so any residual divergence in COMMS-side docs degrades gracefully.
 - **RESOLVED — `ts` unit.** All command paths emit `ts` in milliseconds, including the consumer-group batch path (`src/ConsumerGroupHandler.php`, `t='bc'` message, now `(string)(int)(microtime(true)*1000)`) and the main paths. No residual float-seconds path remains.
 - **ADHERES — health field names.** Producer emits abbreviated `t='lu', si, l, cpu, mem, rq, lat, err, ts` (`src/Health/HealthMetrics.php`); the daemon's health reader consumes exactly these names — `t=='lu'` gate plus required `si/l/ts` and optional `cpu/mem/rq/lat/err` (`gNode daemon/src/integration/processor/health_processor.rs`).

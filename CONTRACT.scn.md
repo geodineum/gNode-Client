@@ -9,7 +9,7 @@ PHP client lib for the gNode daemon (gNode=Sun) over RESP3/ValKey (=common backe
 - entry: `gNodeClient` class `src/gNodeClient.php` · `implements gNodeClientInterface`
 - factory: `forSite(siteId, environment='production', overrides=[])` (canonical)
 - cache: `luaGet` → `FCALL GNODE_CACHE_GET` · `luaSet` → `FCALL GNODE_CACHE_SET`
-- fcall gate: `fcall(fn,keys,args)`; allowlist regex `^(GNODE|GCUBE|COMMS|GC)_[A-Z0-9_]+$` (throws pre-wire)
+- fcall gate: `fcall(fn,keys,args)`; allowlist regex `^(GNODE|GCUBE|COMMS|GC|GCORE_MGR_(CONFIG|SECRETS))_[A-Z0-9_]+$` (throws pre-wire)
 - comms: `queueCommsMessage` · `queueContactForm` · `getCommsStream`
 - orch: `postToGeodineum` (write-only XADD; the sole orchestration surface)
 - stream keys: `getComputeStream` (=unified stream the daemon listens on) · `getHealthStream` · `getBroadcastStream`
@@ -26,7 +26,7 @@ PHP/PSR-4, single public class `gNodeClient` (80+ methods) delegating to submodu
 KEY design: FCALL-only (no raw Redis cmds; ACL-enforced Lua) · stream async (XADD fire-and-forget + consumer groups for reliable delivery) · per-env DTAP isolation (stream keys carry `{environment}`, NOT node_id) · hash-tagged keys (braces ∀ site_id) for Cluster safety · size-capped JSON decode (4MB/64-depth) as daemon-bug defense · transient-error retry w/ exp backoff · stable client-id (hostname-pid) for group uniqueness · best-effort metrics (INCR+PFADD on `{site}:metrics:*` for gDash) · graceful degradation via FallbackHandler (local exec if daemon unreachable) · environment scalar = authoritative for non-prod gating (NOT nested metadata).
 
 ## ::IO
-IN ← ValKey daemon (port 47445): FCALL responses (JSON str via safeJsonDecode 4MB/64-depth → default on fail, or scalar); creds (64-hex plaintext, file chain `VALKEY_PASSWORD_FILE`→`/etc/geodineum/credentials/{site}.password`→legacy); registered Lua fns (`FUNCTION LOAD`, names `GNODE|GCUBE|COMMS|GC_*`).
+IN ← ValKey daemon (port 47445): FCALL responses (JSON str via safeJsonDecode 4MB/64-depth → default on fail, or scalar); creds (64-hex plaintext, file chain `VALKEY_PASSWORD_FILE`→`/etc/geodineum/credentials/{site}.password`→legacy); registered Lua fns (`FUNCTION LOAD`, names `GNODE|GCUBE|COMMS|GC_*`, `GCORE_MGR_(CONFIG|SECRETS)_*`).
 IN ← daemon as stream writer: broadcast stream (no group, self-track position).
 OUT → ValKey XADD:
 - comms `{siteId}:gnode:comms:{env}`: scalar `id,type,timestamp,site_id,environment(AUTH),priority` + JSON `sender,content,metadata,dispatch`
@@ -51,7 +51,7 @@ ONE topology per constellation `{<c>}:gnode:constellation` (gNode `SPEC-ONE-TOPO
 ## ::LIMITATIONS
 - raw Redis/ValKey exposure BLOCKED: `getRedis()` logs the audit line then THROWS StorageException (raw connection bypasses the FCALL allowlist); typed storage API (incr/pfAdd/xAdd/…) covers legit internal needs
 - premium gate = ONE style: `fcallDecode()` prefix map (FEATURE_/EXPERIMENT_/SESSION_/TRACE_→gNode-OBSERVE · ENDPOINT_→gNode-BROKER) returns `{error,premium:true,feature}` — base never puts a Pro function name on the wire; bool/nullable wrappers degrade per signature; legacy register/get/list/translate/deregister endpoint duals now DELEGATE to canonical endpoint* methods (raw rawCommand surface deleted)
-- FCALL allowlist restrictive — fns outside `GNODE|GCUBE|COMMS|GC_` uninvokable
+- FCALL allowlist restrictive — fns outside `GNODE|GCUBE|COMMS|GC_` and `GCORE_MGR_(CONFIG|SECRETS)_` uninvokable
 - no HTTP/REST surface — RESP3 only
 - PHP-side signed-extension (extension.sig) NOT implemented (Rust/Lua only, `README.md`)
 - light unit coverage (2) vs integration (8) — most validation needs live ValKey+daemon
@@ -71,7 +71,7 @@ ADHERENCE: comms shape=ADHERES · environment-authority=ADHERES (top-level read)
 ISOLATED_FROM: HTTP/REST clients · raw Redis cmd callers · non-RESP3 transports.
 
 ## ::LATENT
-- "FCALL-only, allowlist `^(GNODE|GCUBE|COMMS|GC)_`, throws pre-wire"
+- "FCALL-only, allowlist `^(GNODE|GCUBE|COMMS|GC|GCORE_MGR_(CONFIG|SECRETS))_`, throws pre-wire"
 - "brace-literal `{siteId}` hash-tag, per-env DTAP stream keys, NOT node_id"
 - "top-level scalar environment is authoritative for non-prod gating, double-stamped in metadata"
 - "stream async XADD + consumer groups gnode-daemon/gnode-client, PEL stall on group mismatch"
