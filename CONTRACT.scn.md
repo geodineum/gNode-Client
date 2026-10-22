@@ -10,7 +10,7 @@ PHP client lib for the gNode daemon (gNode=Sun) over RESP3/ValKey (=common backe
 - factory: `forSite(siteId, environment='production', overrides=[])` (canonical)
 - cache: `luaGet` → `FCALL GNODE_CACHE_GET` · `luaSet` → `FCALL GNODE_CACHE_SET`
 - fcall gate: `fcall(fn,keys,args)`; allowlist regex `^(GNODE|GCUBE|COMMS|GC|GCORE_MGR_(CONFIG|SECRETS))_[A-Z0-9_]+$` (throws pre-wire)
-- comms: `queueCommsMessage` · `queueContactForm` · `getCommsStream`
+- comms: `queueCommsMessage` · `queueAddressedMessage`(type,to{email,name},content,meta,prio → JSON `to`; COMMS emails ONE person, site-allowed types + daily cap; false unless one clean mailbox) · `queueContactForm` · `getCommsStream`
 - orch: `postToGeodineum` (write-only XADD; the sole orchestration surface)
 - stream keys: `getComputeStream` (=unified stream the daemon listens on) · `getHealthStream` · `getBroadcastStream`
 - groups: `ensureConsumerGroups` (`gnode-daemon`+`gnode-client` on unified+health) · `getStreamStatus`

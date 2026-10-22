@@ -4384,6 +4384,7 @@ class gNodeClient implements gNodeClientInterface
      * @param array $metadata Additional metadata ['form_type' => '', 'source_url' => '', 'face_id' => 0]
      * @param int $priority Priority level 1-5 (default: 3 = normal)
      * @param array $channels Dispatch channels (default: ['email'])
+     * @param array|null $to One addressee ['email','name']; use queueAddressedMessage
      * @return string|false Message ID from XADD, or false on failure
      * @api
      */
@@ -4393,7 +4394,8 @@ class gNodeClient implements gNodeClientInterface
         array $content,
         array $metadata = [],
         int $priority = 3,
-        array $channels = ['email']
+        array $channels = ['email'],
+        ?array $to = null
     ): string|false {
         if (!$this->connected && !$this->usingFallback) {
             $this->debug("Cannot queue comms message: not connected");
@@ -4441,6 +4443,9 @@ class gNodeClient implements gNodeClientInterface
                 'next_retry' => null,
             ]),
         ];
+        if ($to !== null) {
+            $message['to'] = json_encode($to);
+        }
 
         try {
             $streamKey = $this->getCommsStream();
@@ -4456,6 +4461,36 @@ class gNodeClient implements gNodeClientInterface
             $this->debug("Failed to queue comms message: " . $e->getMessage());
             return false;
         }
+    }
+
+    /**
+     * Queue a message for ONE person: gNode-COMMS sends it by email to that address only,
+     * never to the site's configured recipients. COMMS accepts it only for the types the
+     * site allows (settings `addressed.types`, default planning) and under its daily cap.
+     *
+     * @param string $type Message type the site allows addressing (e.g. planning)
+     * @param array $to ['email' => '', 'name' => '']
+     * @param array $content ['subject' => '', 'body' => '']
+     * @param array $metadata ['form_type' => '', ...]
+     * @param int $priority 1-5 (default 3)
+     * @return string|false Stream entry ID, or false when not connected or the address is not one mailbox
+     * @api
+     */
+    public function queueAddressedMessage(
+        string $type,
+        array $to,
+        array $content,
+        array $metadata = [],
+        int $priority = 3
+    ): string|false {
+        $email = trim((string)($to['email'] ?? ''));
+        $name = trim((string)($to['name'] ?? ''));
+        if (filter_var($email, FILTER_VALIDATE_EMAIL) === false || preg_match('/[\r\n]/', $email . $name)) {
+            $this->debug("Cannot queue addressed message: not one mailbox");
+            return false;
+        }
+        return $this->queueCommsMessage($type, [], $content, $metadata, $priority, ['email'],
+            ['email' => $email, 'name' => $name]);
     }
 
     /**

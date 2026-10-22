@@ -21,6 +21,7 @@
 - `getStreamStatus(): array` — Get status information about this client's streams
 - `getCommsStream(): string` — Get the comms stream key for this site
 - `queueCommsMessage( string $type, array $sender, array $content, array $metadata = [], int $priority = 3, array $channels = ['email'] ): string|false` — Queue a message to the comms stream for gNode-COMMS to process
+- `queueAddressedMessage( string $type, array $to, array $content, array $metadata = [], int $priority = 3 ): string|false` — Queue a message for one person (gNode-COMMS emails that address only)
 - `queueContactForm( string $name, string $email, string $subject, string $message, array $metadata = [] ): string|false` — Queue a contact form submission to the comms stream
 - `isConnected(): bool` — Check if connected to storage
 - `getStorage(): StorageInterface` — Get the storage interface for direct access

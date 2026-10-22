@@ -7,6 +7,7 @@ of `registerService` and `geometric_discover` changed with gNode's one topology
 (`SPEC-ONE-TOPOLOGY.md`); a daemon on the old tier schema will refuse these.
 
 ### Added
+- `gNodeClient::queueAddressedMessage()` — a comms message for one person (`to`), which gNode-COMMS emails to that address only.
 - `Topology\Declaration` — shape words → shape keys, legacy axis map → `{id, shape, environment, axes, metadata, on, capacity_weight, heartbeat, holds, requires, peers, constellation}`; numbers refused before the wire.
 - `Topology\Query` — `{layer, facets, axes, limit}` from legacy requirement shapes; `relayTarget()` for `_rt`.
 - `gNodeClient::query(array)` — one `geometric_discover`, results carry `service_id, shape, environment, colour, metadata`.

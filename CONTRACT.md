@@ -56,6 +56,7 @@ duals now delegate to the canonical `endpoint*` methods; their former raw
 | Method | Signature | Source |
 |---|---|---|
 | `queueCommsMessage` | `queueCommsMessage(string $type, array $sender, array $content, array $metadata=[], int $priority=3, array $channels=['email']): string\|false` — XADD to comms stream | `src/gNodeClient.php` |
+| `queueAddressedMessage` | `queueAddressedMessage(string $type, array $to, array $content, array $metadata=[], int $priority=3): string\|false` — XADD with `to` {email,name}: gNode-COMMS emails that one person only (types the site allows, under its daily cap); false unless `to` is one clean mailbox | `src/gNodeClient.php` |
 | `queueContactForm` | `queueContactForm(string $name, string $email, string $subject, string $message, array $metadata=[]): string\|false` — convenience wrapper, XADD via `queueCommsMessage` | `src/gNodeClient.php` |
 | `getCommsStream` | `getCommsStream(): string` → `{siteId}:gnode:comms:{environment}` | `src/gNodeClient.php` |
 
@@ -289,7 +290,7 @@ $status = $client->getStreamStatus();
 
 Cross-component status (from ecosystem cross-check). Items below either involve this component directly or are gotchas a producer/consumer must honor.
 
-- **ADHERES — comms wire shape.** `queueCommsMessage`/`queueContactForm` (`src/gNodeClient.php`) emit exactly the fields gNode-COMMS `parse_message` reads (`stream_reader.rs`): brace-literal `{site_id}:gnode:comms:{env}` key, scalar `id/type/timestamp/site_id/environment/priority`, JSON `sender/content/metadata/dispatch`. Field-by-field match.
+- **ADHERES — comms wire shape.** `queueCommsMessage`/`queueContactForm` (`src/gNodeClient.php`) emit exactly the fields gNode-COMMS `parse_message` reads (`stream_reader.rs`): brace-literal `{site_id}:gnode:comms:{env}` key, scalar `id/type/timestamp/site_id/environment/priority`, JSON `sender/content/metadata/dispatch`, and `to` for an addressed message. Field-by-field match.
 - **ADHERES — environment authority.** Top-level scalar `environment` is read directly by COMMS as authoritative (`stream_reader.rs`). The field is **double-stamped** (also nested in `metadata.environment`); this is harmless **only because** COMMS reads the top-level flat field. Any consumer that reads `metadata.environment` instead would let non-prod messages on a prod stream bypass gating.
 - **ADHERES — unified command fields.** Client writes canonical-compact `t/c/p/id/ss/sn/ts`, matching the daemon's `field_names` resolver (`utils.rs`); no legacy `st/n` aliases emitted. The client never emits `ds`/`dn` (dest addressing); those aliases exist daemon-side only.
 - **ADHERES — FCALL allowlist.** Client regex `^(GNODE|GCUBE|COMMS|GC|GCORE_MGR_(CONFIG|SECRETS))_` is a correct superset of all registered `GNODE_*` Lua functions and admits the gCore managers' per-site config functions (`gnode_gcore_config.lua`).
