@@ -3447,7 +3447,8 @@ class gNodeClient implements gNodeClientInterface
                 [$key, $value, 0, $this->siteId]
             );
 
-            return $result === 'OK' || $result === true ||
+            // GNODE_CORE_SET_WITH_TTL returns Lua true, which arrives as the integer 1.
+            return $result === 'OK' || $result === true || $result === 1 ||
                    (is_array($result) && ($result['success'] ?? false));
         } catch (\Exception $e) {
             $this->debug("set failed for key '{$key}': " . $e->getMessage());
