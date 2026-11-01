@@ -330,7 +330,7 @@ class WordPressRESTScanner
      * @param string $serviceId Service ID for the endpoints
      * @return array gNode endpoint definitions
      */
-    public function toGNodeEndpoints(string $serviceId = null): array
+    public function toGNodeEndpoints(?string $serviceId = null): array
     {
         $gNodeEndpoints = [];
 
