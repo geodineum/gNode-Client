@@ -91,10 +91,10 @@ constructs it (all in `src/gNodeClient.php`). Parameter and return semantics:
 
 | Command (wire) | Client method | Source |
 |---|---|---|
-| `geometric_discover` | `geometricDiscover(array $capabilities, int $limit=10, float $threshold=0.0): array` (legacy entry point routed through `Topology\Query::fromLegacy` to `{layer, facets, axes, limit}`; list of `{service_id, ...}`; `query(array $q)` is the direct form); also `findServices(array $requirements): array` | `:1787`, `:4763` |
-| `geometric_discover_range` | `discoverRange(array $criteria): array` (service ids) | `:1816` |
-| `geometric_dimensions` | `getCapabilityDimensions(): array` | `:1848` |
-| `geometric_load_sequence` | `getLoadSequence(string $group='default'): array` | `:4450` |
+| `geometric_discover` | `query(array $q): array` (`{layer, facets, axes, limit}` as `Topology\Query::build()` shapes it; records with `service_id`, `shape`, `environment`, `colour`, `metadata`); `geometricDiscover(array $requirements, int $limit=10, string $layer='3')` and `findServices(array $requirements)` route through `Query::fromLegacy` | `src/gNodeClient.php` |
+| (`geometric_discover`) | `discoverRange(array $criteria, string $layer='3'): array` (service ids; the same one query, no separate wire command) | `src/gNodeClient.php` |
+| (none) | `getCapabilityDimensions(string $shape='daemon'): array` (axis → slot map read from the published `GNODE_SCHEMA_GET` hash, not a wire command) | `src/gNodeClient.php` |
+| `geometric_load_sequence` | `getLoadSequence(string $group='default'): array` (the daemon registers no handler for this name on the one topology; the call returns `[]`) | `src/gNodeClient.php` |
 | `registerService` | `registerService(string $id, array $capabilities, array $metadata=[]): bool` | `:4282` |
 | `deregisterService` | `deregisterService(string $serviceId): bool` | `:4354` |
 | `service_describe` | `getServiceDetails(string $serviceId): array` | `:4419` |

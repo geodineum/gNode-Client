@@ -49,7 +49,7 @@
 - `geometricDiscover(array $requirements, int $limit = 10, string $layer = '3'): array` — Discover services on the one topology by the words of their declaration
 - `query(array $query): array` — One discovery, as Query::build() shapes it
 - `discoverRange(array $criteria, string $layer = '3'): array` — Discover services using range query operators
-- `getCapabilityDimensions(string $shape = 'daemon'): array` — Get registered capability dimensions
+- `getCapabilityDimensions(string $shape = 'daemon'): array` — The axis name to slot map of a shape, as the daemon published it
 - `getTopology(): array` — The constellation grouped by layer: {services, nodes, components, placements}
 - `getTopologyNamespace(): string` — The constellation this client reads and registers in
 - `getBundle(bool $decompress = true)` — Get entire site bundle
