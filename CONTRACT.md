@@ -78,7 +78,7 @@ duals now delegate to the canonical `endpoint*` methods; their former raw
 
 | Method | Signature | Source |
 |---|---|---|
-| `ensureConsumerGroups` | `ensureConsumerGroups(): array` — creates `gnode-daemon` and `gnode-client` groups on unified+health | `src/gNodeClient.php` |
+| `ensureConsumerGroups` | `ensureConsumerGroups(): array` — creates the `gnode-daemon` group on unified+health (`gnode-client` is retired: replies are read from `{siteId}:res:{id}`) | `src/gNodeClient.php` |
 | `getStreamStatus` | `getStreamStatus(): array` — keys: `site_id, environment, node_id, streams, consumer_groups, connected, using_fallback` | `src/gNodeClient.php` |
 
 ### 1.8 Health publishing
@@ -138,7 +138,7 @@ gNode spec `SPEC-ONE-TOPOLOGY.md` is canonical; this client never writes a coord
 | `gNodeClient::deregisterService` | `deregisterService(string $id): bool` → `deregisterService {service_id}` | removes the entity and its placements |
 | `gNodeClient::query` | `query(array $q): array` → `geometric_discover {layer, facets, axes, limit}` | `layer` = shape word or key (`3` = every service, default); `facets` = axis → word or words (any-of); `axes` = axis → `[lo, hi]` of words or fractions. Axes not named do not count. Answers the daemon's `results`: `{service_id, shape, environment, colour, metadata}`. |
 | `gNodeClient::geometricDiscover` / `findServices` / `discoverByCapabilities` / `discoverRange` | legacy entry points, all through `Topology\Query::fromLegacy` | a word is a facet, a list any-of, `min`/`max` `gte`/`lte` or `[lo, hi]` an axis range; a number is refused |
-| `gNodeClient::sendCommandToCapable` | `sendCommandToCapable(string $command, array $params, array $requirements, array $opts = []): array` → `sendRawCommand` with `_rt` = the query as JSON (`{layer, facets, axes}`) | the daemon resolves `_rt` **once per relay**: service by colour, placement by its ring (weighted round-robin; weight 0 = standby; sites are never relay targets). `candidate`/`exclude_self` are gone with the client-side pick. |
+| `gNodeClient::sendCommandToCapable` | `sendCommandToCapable(string $command, array $params, array $requirements, array $opts = []): array` → `sendRawCommand` with `_rt` = the query as JSON (`{layer, facets, axes}`); `sendRawCommand` XADDs to the unified stream (no consumer groups needed) and polls `{siteId}:res:{id}` for the reply the daemon carries home | the daemon resolves `_rt` **once per relay**: service by colour, placement by its ring (weighted round-robin; weight 0 = standby; sites are never relay targets). `candidate`/`exclude_self` are gone with the client-side pick. |
 | `gNodeClient::getPublishedCapabilitySchema` | `getPublishedCapabilitySchema(string $shape = 'daemon'): ?array` → `FCALL_RO GNODE_SCHEMA_GET 0 <ns> <shape key>` | reads `{<ns>}:gnode:constellation:schema:<shape>`: `schema_version, shape, name, width (24), layer_code, layer_hi, slots, dimension_index, dimension_values, fundamentality_default`; `null` when not yet published |
 | `gNodeClient::getTopology` | `getTopology(): array` → `FCALL GNODE_HASH_HGETALL {<ns>}:gnode:constellation:entities` | one read, grouped by layer: `{services (3.x), nodes (1), components (2), placements (4.x)}`; each entry `{id, shape, environment, colour, metadata, point[24], load, health, lifecycle, registered_at, registered_order, of?, on?, weight?, heartbeat?}` (`decodeEntity()`). |
 | `gNodeClient::getServiceCapabilities` | `getServiceCapabilities(string $id): ?array` → `HGET {<ns>}:gnode:constellation:entities <id>` | `{service_id, shape, environment, capabilities (colour), metadata, load, health, registered_at}` |
@@ -156,12 +156,11 @@ What this library needs, and from which component.
 | RESP3 XADD | `XADD [key] [id (*=autogen)] [field value]...` → `[message_id]` | ValKey daemon, port 47445 | `src/Storage/ValKeyStorage.php`; `src/gNodeClient.php` |
 | Credentials (password) | Plain-text 64-char hex; file chain `env VALKEY_PASSWORD_FILE` → `/etc/geodineum/credentials/{site}.password` → legacy | Geodineum installer + filesystem | `src/Config/CredentialResolver.php` (5-level chain); `CLAUDE.md` |
 | Lua functions in ValKey | `FUNCTION LOAD`; names `GNODE_* \| GCUBE_* \| COMMS_* \| GC_* \| GCORE_MGR_CONFIG_* \| GCORE_MGR_SECRETS_*`; invoked via FCALL | gNode daemon (function registration) | `README.md`; `src/gNodeClient.php` |
-| Stream `{siteId}:gnode:unified:{environment}` | RESP3 stream; consumer groups `gnode-daemon`, `gnode-client`; hash-tagged key | gNode daemon (reader) | `src/gNodeClient.php`; `src/ConsumerGroupHandler.php` |
+| Stream `{siteId}:gnode:unified:{environment}` | RESP3 stream; consumer group `gnode-daemon`; hash-tagged key | gNode daemon (reader) | `src/gNodeClient.php`; `src/ConsumerGroupHandler.php` |
 | Stream `{siteId}:gnode:health:{environment}` | RESP3 stream; consumer group `gnode-daemon`; compressed schema | gNode daemon (reader) | `src/Health/HealthStreamWriter.php`; `src/Health/HealthMetrics.php` |
 | Stream `{siteId}:gnode:broadcast:global` | RESP3 stream; **no consumer groups**; readers track own position | gNode daemon (writer); PHP clients (readers) | `src/gNodeClient.php`; `src/Broadcast/BroadcastReader.php` |
 | Stream `geodineum:gnode:orchestration` | RESP3 stream; fields `type, site_id, environment, data(JSON), timestamp` | Geodineum orchestration (reader) | `src/gNodeClient.php` |
 | Consumer group `gnode-daemon` | Named group on unified+health; daemon auto-creates and claims | gNode daemon | `src/gNodeClient.php`; `src/ConsumerGroupHandler.php` |
-| Consumer group `gnode-client` | Named group on unified+health (client-side consumers if enabled) | Client application | `src/gNodeClient.php`; `CLAUDE.md` |
 
 ACL user pattern: username `gnode_client_{site_id}`, key pattern `~{site_id}:gnode:*` plus DTAP environment rules (`CLAUDE.md`).
 
