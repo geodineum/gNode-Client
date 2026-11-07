@@ -3868,11 +3868,11 @@ class gNodeClient implements gNodeClientInterface
      */
     public function sendRawMessage(array $fields, ?string $requestId = null): string
     {
-        if (!$this->consumerHandler) {
-            throw new gNodeException("Consumer handler not initialized");
+        if ($this->consumerHandler) {
+            return $this->consumerHandler->sendRawMessage($fields, $requestId);
         }
 
-        return $this->consumerHandler->sendRawMessage($fields, $requestId);
+        return $this->storage->xAdd($this->getComputeStream(), '*', $fields);
     }
 
     /**
@@ -3901,11 +3901,7 @@ class gNodeClient implements gNodeClientInterface
             $messageId = $this->sendRawMessage($fields, $requestId);
             $this->debug("Raw command sent: {$command} with message ID: {$messageId}");
 
-            if ($this->usingConsumerGroups && $this->consumerHandler) {
-                $response = $this->consumerHandler->waitForResponse($requestId, $this->timeout);
-            } else {
-                $response = $this->pollForResponse($requestId, $this->timeout, $command);
-            }
+            $response = $this->pollForResponse($requestId, $this->timeout, $command);
 
             return $response ?: ['success' => false, 'error' => 'No response received'];
         } catch (\Exception $e) {
